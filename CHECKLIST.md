@@ -15,6 +15,8 @@
 - [ ] RepoToolEnv stage4 (procedural, less hand-crafted): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_arith,test:proc_arith" --seed 0`.
 - [ ] RepoToolEnv stage4 (procedural, OOD split): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_arith,test:proc_arith_ood" --seed 0`.
 - [ ] RepoToolEnv stage4 (procedural, multi-file): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_bundle,test:proc_bundle" --seed 0`.
+- [ ] RepoToolEnv stage4 (tool-loop candidates, single-file): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_arith_loop,test:proc_arith_loop" --seed 0`.
+- [ ] RepoToolEnv stage4 (tool-loop candidates, multi-file): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_bundle_loop,test:proc_bundle_loop" --seed 0`.
 - [ ] RepoToolEnv stage4 (procedural, refactor multi-file): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_refactor,test:proc_refactor" --seed 0`.
 - [ ] RepoToolEnv stage4 (procedural, regression): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_regression,test:proc_regression" --seed 0`.
 - [ ] RepoTool sweep: `python run_sweep.py --env-type repo --repo-scenarios "train:calc_add,test:calc_div"` (outputs `*_repo.json`), then `python analyze_sweep.py --sweep-path sweep_results/stage4_lifecycle_sweep_repo.json`.

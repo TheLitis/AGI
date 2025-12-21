@@ -533,7 +533,9 @@ class RepoToolEnv(BaseEnv):
         self.rng = np.random.RandomState(seed)
         self.view_size = int(self.config.patch_size)
         self._n_actions = len(self.ACTIONS)
-        self.n_cell_types = int(self.config.progress_token_max) + 16 + int(max(0, self.config.hash_buckets))
+        # Reserve a small block of tokens for non-hashed control signals (flags/view/action).
+        # Keep hash tokens disjoint from those reserved ids to reduce collisions.
+        self.n_cell_types = int(self.config.progress_token_max) + 32 + int(max(0, self.config.hash_buckets))
 
         self.n_scenarios = max(1, len(self.task_set))
         self.scenario_configs = [
@@ -556,13 +558,19 @@ class RepoToolEnv(BaseEnv):
         self.patch_order: List[int] = []
         self.patch_cursor: int = 0
         # Observation "inspection" mode:
-        #   0 = patch option view, 1 = file list view, 2 = pytest output view.
+        #   0 = patch option view, 1 = file list view, 2 = pytest output view, 3 = focus snippet.
         self.view_mode: int = 0
         self.last_test_passed: Optional[bool] = None
         self.last_tests_passed: int = 0
         self.last_tests_total: int = 0
         self.last_pytest_output: str = ""
         self.workspace_dirty: bool = True
+        # Failure focus state (used for inspection/tool-loop support).
+        self.focus_func: Optional[str] = None
+        self.focus_file: Optional[str] = None
+        self.focus_text: str = ""
+        # Dynamic/tool-loop patch generation can key off the last failure signature.
+        self._last_failure_sig_for_candidates: str = ""
         self._env_descriptor = self._compute_env_descriptor()
 
     # ----- BaseEnv compatibility -----
@@ -656,6 +664,10 @@ class RepoToolEnv(BaseEnv):
         self.last_tests_passed = 0
         self.last_tests_total = 0
         self.last_pytest_output = ""
+        self.focus_func = None
+        self.focus_file = None
+        self.focus_text = ""
+        self._last_failure_sig_for_candidates = ""
 
     def _choose_action_patch_indices(self, task: Optional[RepoTask]) -> List[int]:
         """
@@ -707,7 +719,280 @@ class RepoToolEnv(BaseEnv):
         self.action_patch_indices = self._current_patch_pair(task_obj)
 
     def _cycle_view_mode(self) -> None:
-        self.view_mode = int((int(getattr(self, "view_mode", 0)) + 1) % 3)
+        # 0 = patch options, 1 = file list, 2 = pytest output, 3 = focused snippet.
+        self.view_mode = int((int(getattr(self, "view_mode", 0)) + 1) % 4)
+
+    def _extract_focus_func(self, pytest_output: str) -> Optional[str]:
+        text = (pytest_output or "").strip()
+        if not text:
+            return None
+        for line in text.splitlines():
+            m = re.search(r"assert\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", line)
+            if m:
+                return str(m.group(1))
+        m = re.search(r"FAILED\s+\S+::([A-Za-z_][A-Za-z0-9_]*)", text)
+        if m:
+            name = str(m.group(1))
+            if name.startswith("test_") and len(name) > 5:
+                return name[5:]
+            return name
+        return None
+
+    def _find_def_file(self, func_name: str) -> Optional[Path]:
+        if self.workdir is None:
+            return None
+        name = str(func_name or "").strip()
+        if not name:
+            return None
+
+        pat = re.compile(rf"^\s*def\s+{re.escape(name)}\s*\(", flags=re.MULTILINE)
+        candidates: List[Tuple[int, Path]] = []
+        for p in self.workdir.rglob("*.py"):
+            if not p.is_file():
+                continue
+            rel = str(p.relative_to(self.workdir)).replace("\\", "/")
+            penalty = 0
+            if "/tests/" in f"/{rel}/" or rel.startswith("tests/"):
+                penalty += 10
+            if p.name.startswith("test_"):
+                penalty += 10
+            if p.name == "conftest.py":
+                penalty += 5
+            try:
+                content = p.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            if pat.search(content):
+                candidates.append((penalty, p))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: (x[0], str(x[1])))
+        return candidates[0][1]
+
+    def _update_failure_focus(self) -> None:
+        """
+        Populate focus_* based on the last pytest output.
+
+        Goal: give the agent a low-bandwidth "cursor" pointing to where the bug likely is.
+        """
+        if bool(self.last_test_passed):
+            self.focus_func = None
+            self.focus_file = None
+            self.focus_text = ""
+            return
+        out = str(self.last_pytest_output or "")
+        func = self._extract_focus_func(out)
+        if not func:
+            self.focus_func = None
+            self.focus_file = None
+            self.focus_text = ""
+            return
+
+        p = self._find_def_file(func)
+        if p is None or self.workdir is None:
+            self.focus_func = None
+            self.focus_file = None
+            self.focus_text = ""
+            return
+
+        rel = str(p.relative_to(self.workdir)).replace("\\", "/")
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            self.focus_func = None
+            self.focus_file = None
+            self.focus_text = ""
+            return
+
+        lines = text.splitlines()
+        def_idx: Optional[int] = None
+        ret_idx: Optional[int] = None
+        def_pat = re.compile(rf"^\s*def\s+{re.escape(func)}\s*\(")
+        for i, line in enumerate(lines):
+            if def_pat.search(line):
+                def_idx = i
+                break
+        if def_idx is not None:
+            for j in range(def_idx + 1, len(lines)):
+                if "return " in lines[j]:
+                    ret_idx = j
+                    break
+        parts: List[str] = [rel]
+        if def_idx is not None:
+            parts.append(lines[def_idx].strip())
+        if ret_idx is not None:
+            parts.append(lines[ret_idx].strip())
+        self.focus_func = str(func)
+        self.focus_file = rel
+        self.focus_text = " | ".join([p for p in parts if p])
+
+    def _is_toolloop_task(self, task: Optional[RepoTask] = None) -> bool:
+        task_obj = task or self.current_task
+        if task_obj is None:
+            return False
+        if not _is_procedural_task_name(getattr(task_obj, "name", "")):
+            return False
+        _cat, tags = _procedural_spec(getattr(task_obj, "name", ""))
+        tagset = {str(t).lower() for t in tags}
+        return bool(tagset.intersection({"loop", "toolloop", "open"}))
+
+    def _refresh_toolloop_candidates(self) -> None:
+        """
+        Generate a fresh candidate patch menu based on the current failure focus.
+
+        This is still discrete (action-space stays size=6), but it turns the
+        repo task into a multi-step "run tests -> inspect -> edit -> rerun"
+        loop instead of a one-shot multiple-choice patch selection.
+        """
+        if self.current_task is None or self.workdir is None:
+            return
+        if not self.focus_func or not self.focus_file:
+            return
+
+        rel = _safe_relpath(self.focus_file)
+        path = self.workdir / rel
+        if not path.exists() or not path.is_file():
+            return
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return
+
+        lines = text.splitlines()
+        if not lines:
+            return
+
+        func = str(self.focus_func)
+        def_line = None
+        args_raw = ""
+        for line in lines:
+            m = re.match(rf"^\s*def\s+{re.escape(func)}\s*\((?P<args>[^)]*)\)\s*:", line)
+            if m:
+                def_line = line
+                args_raw = str(m.group("args") or "")
+                break
+        if def_line is None:
+            return
+
+        args: List[str] = []
+        for a in args_raw.split(","):
+            s = str(a).strip()
+            if not s:
+                continue
+            s = s.split("=", 1)[0].strip()
+            if s:
+                args.append(s)
+
+        ret_idx: Optional[int] = None
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith("return "):
+                ret_idx = i
+                break
+        if ret_idx is None:
+            return
+
+        def _ws_prefix(s: str) -> str:
+            return s[: len(s) - len(s.lstrip())]
+
+        a0 = args[0] if len(args) >= 1 else "a"
+        a1 = args[1] if len(args) >= 2 else "b"
+
+        pool: List[str]
+        correct: Optional[str] = None
+        fname = func.lower()
+        if fname in {"add", "plus"}:
+            correct = f"{a0} + {a1}"
+            pool = [
+                f"{a0} - {a1}",
+                f"{a1} - {a0}",
+                f"abs({a0} - {a1})",
+                f"{a0} * {a1}",
+                f"{a0} + {a1} + 1",
+                f"str({a0}) + str({a1})",
+            ]
+        elif fname in {"div", "divide"}:
+            correct = f"{a0} / {a1}"
+            pool = [
+                f"{a0} // {a1}",
+                f"{a1} / {a0}",
+                f"{a0} / ({a1} + 1)",
+                f"{a0} * {a1}",
+            ]
+        elif fname in {"power", "pow"}:
+            correct = f"{a0} ** {a1}"
+            pool = [
+                f"{a0} ^ {a1}",
+                f"{a0} * {a1}",
+                f"pow({a0}, {a1})",
+                f"{a0} ** ({a1} + 1)",
+            ]
+        elif fname in {"reverse"} and len(args) >= 1:
+            s = args[0]
+            correct = f"{s}[::-1]"
+            pool = [
+                s,
+                f"\"\".join(sorted({s}))",
+                f"\"\".join(reversed({s}))",
+                f"{s}[::1]",
+                f"{s}[::-1][1:]",
+            ]
+        elif fname in {"mean"} and len(args) >= 1:
+            xs = args[0]
+            correct = f"sum({xs}) / len({xs})"
+            pool = [
+                f"sum({xs})",
+                f"len({xs})",
+                f"max({xs})",
+                f"sum({xs}) / max(1, len({xs}))",
+            ]
+        elif fname in {"clamp"} and len(args) >= 3:
+            x, lo, hi = args[0], args[1], args[2]
+            correct = f"max({lo}, min({hi}, {x}))"
+            pool = [
+                f"min({lo}, max({hi}, {x}))",
+                f"min({hi}, max({lo}, {x}))",
+                f"max({hi}, min({lo}, {x}))",
+            ]
+        else:
+            return
+
+        pool_full = list(pool)
+        if correct is not None:
+            pool_full = pool_full + [correct]
+
+        cfg = self.config
+        required = int(max(4, getattr(cfg, "procedural_candidates", 8) or 8))
+        if required % 2 == 1:
+            required += 1
+
+        cand_exprs = self._proc_pick_candidates(
+            self.rng,
+            required=required,
+            must_include=[str(correct)] if correct is not None else [],
+            pool=pool_full,
+        )
+
+        indent = _ws_prefix(lines[ret_idx])
+        patches: List[RepoPatch] = []
+        ends_with_nl = bool(text.endswith("\n"))
+        for i, expr in enumerate(cand_exprs):
+            updated_lines = list(lines)
+            updated_lines[ret_idx] = f"{indent}return {expr}"
+            updated = "\n".join(updated_lines) + ("\n" if ends_with_nl else "")
+            patches.append(
+                RepoPatch(
+                    name=f"auto_{fname}_{i}",
+                    description=f"{rel}: return {expr}",
+                    files={rel: updated},
+                )
+            )
+
+        if not patches:
+            return
+
+        self.current_task.patches = patches
+        self.patches_applied = [False, False]
+        self.action_patch_indices = self._choose_action_patch_indices(self.current_task)
 
     def _switch_task(self, task_idx: int) -> None:
         task_idx = int(task_idx) % len(self.task_set)
@@ -723,6 +1008,10 @@ class RepoToolEnv(BaseEnv):
         self.last_tests_passed = 0
         self.last_tests_total = 0
         self.last_pytest_output = ""
+        self.focus_func = None
+        self.focus_file = None
+        self.focus_text = ""
+        self._last_failure_sig_for_candidates = ""
         self._materialize_task(self.current_task)
         self._env_descriptor = self._compute_env_descriptor()
 
@@ -737,7 +1026,9 @@ class RepoToolEnv(BaseEnv):
             return
         cfg = self.config
         category, tags = _procedural_spec(getattr(task, "name", ""))
-        variant = "ood" if "ood" in set(t.lower() for t in tags) else "default"
+        tagset = {str(t).lower() for t in tags}
+        variant = "ood" if "ood" in tagset else "default"
+        toolloop = bool(tagset.intersection({"loop", "toolloop", "open"}))
         n_candidates = int(max(4, getattr(cfg, "procedural_candidates", 8) or 8))
         if n_candidates % 2 == 1:
             n_candidates += 1
@@ -811,6 +1102,9 @@ class RepoToolEnv(BaseEnv):
 
         if variant == "ood":
             desc = f"{desc} (OOD variant)"
+        if toolloop:
+            desc = f"{desc} (tool-loop candidates)"
+            patches = []
 
         task.description = desc
         task.initial_files = initial_files
@@ -1479,7 +1773,7 @@ class RepoToolEnv(BaseEnv):
         patch = np.full((self.view_size, self.view_size), fill_value=token_progress, dtype=np.int64)
 
         hash_buckets = int(max(0, self.config.hash_buckets))
-        hash_base = int(pmax + 16)
+        hash_base = int(pmax + 32)
 
         def _hash_token(text: str) -> int:
             if hash_buckets <= 0 or not text:
@@ -1509,7 +1803,7 @@ class RepoToolEnv(BaseEnv):
             if self.current_task is not None and self.current_task.patches:
                 page = int((self.patch_cursor // 2) if self.patch_cursor >= 0 else 0)
             view = int(getattr(self, "view_mode", 0) or 0)
-            patch[0, 4] = pmax + 12 + int((view % 3) * 4 + (page % 4))
+            patch[0, 4] = pmax + 12 + int((view % 4) * 4 + (page % 4))
 
         # hashed metadata + failure signature (kept discrete to stay compatible with existing Perception)
         if hash_buckets > 0 and self.current_task is not None and self.view_size >= 2:
@@ -1555,6 +1849,11 @@ class RepoToolEnv(BaseEnv):
                         patch[4, i] = _hash_token(tokens[i + max_cells]) if (i + max_cells) < len(tokens) else 0
                 elif view == 2:
                     tokens = _tokenize_for_hash(self.last_pytest_output)
+                    for i in range(max_cells):
+                        patch[3, i] = _hash_token(tokens[i]) if i < len(tokens) else 0
+                        patch[4, i] = _hash_token(tokens[i + max_cells]) if (i + max_cells) < len(tokens) else 0
+                elif view == 3:
+                    tokens = _tokenize_for_hash(self.focus_text)
                     for i in range(max_cells):
                         patch[3, i] = _hash_token(tokens[i]) if i < len(tokens) else 0
                         patch[4, i] = _hash_token(tokens[i + max_cells]) if (i + max_cells) < len(tokens) else 0
@@ -1624,6 +1923,10 @@ class RepoToolEnv(BaseEnv):
         self.last_tests_passed = 0
         self.last_tests_total = 0
         self.last_pytest_output = ""
+        self.focus_func = None
+        self.focus_file = None
+        self.focus_text = ""
+        self._last_failure_sig_for_candidates = ""
         self._materialize_task(self.current_task)
         self._env_descriptor = self._compute_env_descriptor()
         return self._get_obs(last_action=0)
@@ -1666,6 +1969,12 @@ class RepoToolEnv(BaseEnv):
                 self.last_pytest_output = out
                 self.workspace_dirty = False
                 self._env_descriptor = self._compute_env_descriptor()
+                self._update_failure_focus()
+                if (not bool(ok)) and self._is_toolloop_task(self.current_task):
+                    sig = _pytest_failure_signature(out)
+                    if sig != str(self._last_failure_sig_for_candidates or "") or not (self.current_task.patches or []):
+                        self._refresh_toolloop_candidates()
+                        self._last_failure_sig_for_candidates = sig
                 new_progress = float(self._progress())
                 reward += float(self.config.progress_reward_scale) * (new_progress - prev_progress)
             if self.last_test_passed:

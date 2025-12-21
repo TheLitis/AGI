@@ -35,3 +35,8 @@ def test_repo_tool_env_noop_cycles_inspection_view(tmp_path):
     # With pytest output present, view 2 should carry at least one non-zero hashed token.
     assert int(obs2["patch"][3].max()) > 0 or int(obs2["patch"][4].max()) > 0
 
+    obs3, _, _, _ = env.step(0)  # NO_OP -> view 3 (focus snippet)
+    assert getattr(env, "view_mode", 0) == 3
+    assert obs3["patch"].min() >= 0
+    assert obs3["patch"].max() < env.n_cell_types
+    assert int(obs3["patch"][3].max()) > 0 or int(obs3["patch"][4].max()) > 0
