@@ -2737,6 +2737,100 @@ class Trainer:
 
         return penalized.unsqueeze(0)
 
+    def _planner_logits_beam(
+        self,
+        z_obs: torch.Tensor,   # (1, obs_dim)
+        H_t: torch.Tensor,     # (1, h_dim)
+        h_w: torch.Tensor,     # (1, 1, w_dim)
+        traits: torch.Tensor,  # (1, trait_dim)
+        M: torch.Tensor,       # (1, mem_dim)
+    ) -> torch.Tensor:
+        """
+        Beam-search planner over primitive actions using the learned world model.
+
+        Notes:
+          - Uses `planner_rollouts` as the beam width (keeps CLI stable).
+          - Ranks partial sequences by safety-penalized score but returns unpenalized
+            (q_main, q_safety) so the final safety penalty is applied only once.
+        """
+        A = int(self.env.n_actions)
+        B = int(max(1, self.planner_rollouts))
+        H = int(max(1, self.planning_horizon))
+        gamma = float(self.planner_gamma)
+        device = self.device
+
+        with torch.no_grad():
+            traits_main = traits if traits is not None else self._mixed_traits()
+            if traits_main.dim() == 1:
+                traits_main = traits_main.view(1, -1)
+            traits_safety = self._safety_traits()
+            if traits_safety.dim() == 1:
+                traits_safety = traits_safety.view(1, -1)
+
+            q_main = torch.zeros(A, device=device, dtype=z_obs.dtype)
+            q_safety = torch.zeros(A, device=device, dtype=z_obs.dtype)
+
+            threshold = torch.as_tensor(self.safety_threshold, device=device, dtype=z_obs.dtype)
+            coef = float(self.safety_penalty_coef)
+
+            for a0 in range(A):
+                a0_t = torch.tensor([int(a0)], device=device, dtype=torch.long)
+                W0, h_cur, z_cur, H_cur = self.agent.world_model.forward_step(z_obs, H_t, a0_t, h_w)
+                V0_main = self.agent.value_model(W0, H_cur, traits_main, M).view(-1)
+                V0_safety = self.agent.value_model(W0, H_cur, traits_safety, M).view(-1)
+
+                beam_z = z_cur.detach()
+                beam_H = H_cur.detach()
+                beam_h = h_cur.detach()
+                beam_main = V0_main.clone()
+                beam_safety = V0_safety.clone()
+
+                disc = gamma
+                for _ in range(1, H):
+                    beam_size = int(beam_z.size(0))
+                    z_rep = beam_z.repeat_interleave(A, dim=0)
+                    H_rep = beam_H.repeat_interleave(A, dim=0)
+                    h_rep = beam_h.repeat_interleave(A, dim=1)
+                    a_rep = torch.arange(A, device=device, dtype=torch.long).repeat(beam_size)
+
+                    Wn, h_next, z_next, H_next = self.agent.world_model.forward_step(z_rep, H_rep, a_rep, h_rep)
+                    n = int(z_next.size(0))
+                    traits_rep = traits_main.expand(n, -1)
+                    traits_rep_safety = traits_safety.expand(n, -1)
+                    M_rep = M.expand(n, -1)
+
+                    V_main = self.agent.value_model(Wn, H_next, traits_rep, M_rep).view(-1)
+                    V_safety = self.agent.value_model(Wn, H_next, traits_rep_safety, M_rep).view(-1)
+
+                    main_new = beam_main.repeat_interleave(A) + disc * V_main
+                    safety_new = beam_safety.repeat_interleave(A) + disc * V_safety
+
+                    gap = torch.clamp(threshold - safety_new, min=0.0)
+                    penalized = main_new - coef * gap
+                    k = int(min(B, int(penalized.numel())))
+                    top = torch.topk(penalized, k=k)
+                    idx = top.indices
+
+                    beam_z = z_next[idx].detach()
+                    beam_H = H_next[idx].detach()
+                    beam_h = h_next[:, idx, :].detach()
+                    beam_main = main_new[idx]
+                    beam_safety = safety_new[idx]
+                    disc = disc * gamma
+
+                gap = torch.clamp(threshold - beam_safety, min=0.0)
+                penalized = beam_main - coef * gap
+                best = int(torch.argmax(penalized).item()) if penalized.numel() > 0 else 0
+                q_main[a0] = beam_main[best]
+                q_safety[a0] = beam_safety[best]
+
+            penalized = self._apply_safety_penalty(q_main, q_safety)
+            penalized = penalized - penalized.mean()
+            std = penalized.std()
+            if std > 1e-6:
+                penalized = penalized / std
+            return penalized.unsqueeze(0)
+
     def _get_planner_logits(
         self,
         z_obs: torch.Tensor,
@@ -2773,6 +2867,14 @@ class Trainer:
             )
         elif self.planner_mode == "rollout":
             return self._planner_logits_multistep(
+                z_obs=z_obs,
+                H_t=H_t,
+                h_w=h_w,
+                traits=traits,
+                M=M,
+            )
+        elif self.planner_mode == "beam":
+            return self._planner_logits_beam(
                 z_obs=z_obs,
                 H_t=H_t,
                 h_w=h_w,

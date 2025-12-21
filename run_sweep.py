@@ -53,8 +53,8 @@ def main():
         "--env-type",
         type=str,
         default="gridworld",
-        choices=["gridworld", "minigrid", "tools", "computer", "repo", "mixed"],
-        help="Environment family: gridworld (toy default), minigrid, tools, computer, repo, or mixed.",
+        choices=["gridworld", "minigrid", "tools", "instruction", "social", "computer", "repo", "mixed"],
+        help="Environment family: gridworld (toy default), minigrid, tools, instruction, social, computer, repo, or mixed.",
     )
     parser.add_argument(
         "--minigrid-scenarios",

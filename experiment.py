@@ -144,6 +144,60 @@ def _build_computer_env_pool(
     )
 
 
+def _build_instruction_env_pool(
+    seed: int,
+    schedule_mode: str,
+) -> EnvPool:
+    from instruction_env import InstructionEnv, InstructionEnvConfig
+
+    cfg = InstructionEnvConfig()
+    train_env = InstructionEnv(config=cfg, env_id=0, env_name="instruction_train", seed=seed + 0)
+    test_env = InstructionEnv(config=cfg, env_id=1, env_name="instruction_test", seed=seed + 1)
+
+    # Make test instructions slightly different (OOD-ish phrasing).
+    if getattr(test_env, "scenario_configs", None):
+        for conf in test_env.scenario_configs:
+            if isinstance(conf, dict) and "description" in conf:
+                conf["description"] = str(conf["description"]).replace("go to", "navigate to").replace("TAKE", "pick")
+
+    envs = [train_env, test_env]
+    train_ids = [train_env.env_id]
+    test_ids = [test_env.env_id]
+    pool = EnvPool(
+        envs=envs,
+        schedule_mode=schedule_mode,
+        seed=seed,
+        train_env_ids=train_ids,
+        test_env_ids=test_ids,
+    )
+    pool.task_metadata_instruction = [dict(x) for x in (train_env.scenario_configs + test_env.scenario_configs)]  # type: ignore[attr-defined]
+    return pool
+
+
+def _build_social_env_pool(
+    seed: int,
+    schedule_mode: str,
+) -> EnvPool:
+    from social_env import SocialEnv, SocialEnvConfig
+
+    cfg = SocialEnvConfig()
+    train_env = SocialEnv(config=cfg, env_id=0, env_name="social_train", seed=seed + 0)
+    test_env = SocialEnv(config=cfg, env_id=1, env_name="social_test", seed=seed + 1)
+
+    envs = [train_env, test_env]
+    train_ids = [train_env.env_id]
+    test_ids = [test_env.env_id]
+    pool = EnvPool(
+        envs=envs,
+        schedule_mode=schedule_mode,
+        seed=seed,
+        train_env_ids=train_ids,
+        test_env_ids=test_ids,
+    )
+    pool.task_metadata_social = [dict(x) for x in (train_env.scenario_configs + test_env.scenario_configs)]  # type: ignore[attr-defined]
+    return pool
+
+
 def _build_repo_env_pool(
     seed: int,
     schedule_mode: str,
@@ -388,6 +442,16 @@ def run_experiment(
             seed=seed,
             schedule_mode=schedule_mode,
         )
+    elif env_choice == "instruction":
+        env_pool = _build_instruction_env_pool(
+            seed=seed,
+            schedule_mode=schedule_mode,
+        )
+    elif env_choice == "social":
+        env_pool = _build_social_env_pool(
+            seed=seed,
+            schedule_mode=schedule_mode,
+        )
     elif env_choice == "minigrid":
         env_pool = _build_minigrid_env_pool(
             seed=seed,
@@ -418,7 +482,7 @@ def run_experiment(
         )
     else:
         raise ValueError(
-            f"Unknown env_type '{env_type}'; expected 'gridworld', 'minigrid', 'tools', 'computer', 'repo', or 'mixed'."
+            f"Unknown env_type '{env_type}'; expected 'gridworld', 'minigrid', 'tools', 'instruction', 'social', 'computer', 'repo', or 'mixed'."
         )
 
     train_latent_flag = train_latent_skills

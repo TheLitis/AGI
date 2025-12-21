@@ -4,6 +4,8 @@
 - [ ] Quick debug (toy): `python run_all.py --mode stage4 --agent-variant full --seed 0`.
 - [ ] Quick bench battery: `python bench.py --quick`.
 - [ ] MiniGrid stage4 + lifecycle: `python run_all.py --mode stage4 --agent-variant full --env-type minigrid --minigrid-scenarios "minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing" --seed 0`.
+- [ ] Instruction env (language conditioning): `python run_all.py --mode stage4 --agent-variant full --env-type instruction --seed 0`.
+- [ ] Social env (multi-agent): `python run_all.py --mode stage4 --agent-variant full --env-type social --seed 0`.
 - [ ] MiniGrid sweep: `python run_sweep.py --env-type minigrid --minigrid-scenarios "minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing"` (outputs `*_minigrid.json`), then `python analyze_sweep.py --sweep-path sweep_results/stage4_lifecycle_sweep_minigrid.json`.
 - [ ] Mixed GridWorld + MiniGrid: `python run_all.py --mode stage4 --env-type mixed --minigrid-scenarios "minigrid-empty,minigrid-doorkey"`.
 - [ ] Mixed (+ Computer): `python run_all.py --mode stage4 --env-type mixed --minigrid-scenarios "minigrid-empty,minigrid-doorkey" --computer-scenarios "simple_project,refactor_project"`.
@@ -11,6 +13,10 @@
 - [ ] RepoToolEnv stage4 (real tool-loop): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:calc_add,test:calc_div" --seed 0`.
 - [ ] RepoToolEnv stage4 (multi-task + OOD-ish): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:calc_add,train:calc_pow,train:string_reverse,train:list_sum,test:calc_div,test:calc_bundle" --seed 0`.
 - [ ] RepoToolEnv stage4 (procedural, less hand-crafted): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_arith,test:proc_arith" --seed 0`.
+- [ ] RepoToolEnv stage4 (procedural, OOD split): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_arith,test:proc_arith_ood" --seed 0`.
+- [ ] RepoToolEnv stage4 (procedural, multi-file): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_bundle,test:proc_bundle" --seed 0`.
+- [ ] RepoToolEnv stage4 (procedural, refactor multi-file): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_refactor,test:proc_refactor" --seed 0`.
+- [ ] RepoToolEnv stage4 (procedural, regression): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_regression,test:proc_regression" --seed 0`.
 - [ ] RepoTool sweep: `python run_sweep.py --env-type repo --repo-scenarios "train:calc_add,test:calc_div"` (outputs `*_repo.json`), then `python analyze_sweep.py --sweep-path sweep_results/stage4_lifecycle_sweep_repo.json`.
 - [ ] Lifelong on MiniGrid: `python run_all.py --mode lifelong --env-type minigrid --seed 0` (adjust episodes if needed).
 - [ ] Enable regime-aware replay when debugging forgetting: add `--regime-aware-replay`.

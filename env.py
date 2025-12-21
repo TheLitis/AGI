@@ -23,6 +23,8 @@ ENV_FAMILY_IDS = {
     "tools-basic": 5,
     "computer-basic": 6,
     "repo-basic": 7,
+    "instruction-basic": 8,
+    "social-basic": 9,
 }
 
 
@@ -35,6 +37,10 @@ def canonical_env_family(name: str) -> str:
         return "repo-basic"
     if "tool" in base:
         return "tools-basic"
+    if "instruction" in base or "language" in base:
+        return "instruction-basic"
+    if "social" in base or "multiagent" in base:
+        return "social-basic"
     if "computer" in base or "code" in base or "project" in base:
         return "computer-basic"
     if "lava" in base:

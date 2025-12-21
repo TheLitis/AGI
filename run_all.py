@@ -73,11 +73,12 @@ def main(
             "--env-type",
             type=str,
             default="gridworld",
-            choices=["gridworld", "minigrid", "tools", "computer", "repo", "mixed"],
+            choices=["gridworld", "minigrid", "tools", "instruction", "social", "computer", "repo", "mixed"],
             help=(
                 "Environment family to use "
                 "(gridworld=toy default, minigrid=MiniGrid backend, "
-                "tools=arithmetic env, computer=simulated coding tasks, "
+                "tools=arithmetic env, instruction=language-conditioned env, "
+                "social=multi-agent env, computer=simulated coding tasks, "
                 "repo=sandbox repo tasks (real pytest), "
                 "mixed=mixture of supported env families)."
             ),
@@ -102,7 +103,7 @@ def main(
             "--planner-mode",
             type=str,
             default="rollout",
-            choices=["none", "repeat", "rollout", "skills"],
+            choices=["none", "repeat", "rollout", "beam", "skills"],
         )
         parser.add_argument(
             "--planner-rollouts",

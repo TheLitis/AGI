@@ -48,6 +48,8 @@ class BenchCase:
 
 DEFAULT_CASES: List[BenchCase] = [
     BenchCase(name="gridworld", env_type="gridworld"),
+    BenchCase(name="instruction", env_type="instruction"),
+    BenchCase(name="social", env_type="social"),
     BenchCase(
         name="minigrid",
         env_type="minigrid",
@@ -84,7 +86,7 @@ def parse_args() -> argparse.Namespace:
         "--only",
         type=str,
         default=None,
-        help="Comma-separated subset of cases to run (gridworld|minigrid|repo|mixed).",
+        help="Comma-separated subset of cases to run (gridworld|instruction|social|minigrid|repo|mixed).",
     )
     parser.add_argument("--quick", action="store_true", help="Smaller/faster settings (good for smoke checks).")
     parser.add_argument("--use-skills", action="store_true", help="Enable hierarchical skills.")
@@ -200,4 +202,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

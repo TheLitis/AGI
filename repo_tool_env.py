@@ -166,13 +166,15 @@ def _is_procedural_task_name(name: str) -> bool:
     return n.startswith("proc") or n.startswith("procedural")
 
 
-def _procedural_category(name: str) -> str:
+def _procedural_spec(name: str) -> Tuple[str, List[str]]:
     """
-    Parse a procedural task name into a coarse category.
+    Parse a procedural task name into (category, tags).
+
     Examples:
-      - "proc" -> "mixed"
-      - "proc_arith" / "proc:arith" -> "arith"
-      - "procedural_string" -> "string"
+      - "proc" -> ("mixed", [])
+      - "proc_arith" / "proc:arith" -> ("arith", [])
+      - "proc_arith_ood" -> ("arith", ["ood"])
+      - "procedural_refactor_hard" -> ("refactor", ["hard"])
     """
     raw = (name or "").strip().lower()
     for prefix in ("proc:", "procedural:", "proc_", "procedural_"):
@@ -181,8 +183,23 @@ def _procedural_category(name: str) -> str:
             break
     raw = raw.strip("_: ")
     if not raw:
-        return "mixed"
-    return raw.split("_", 1)[0].split(":", 1)[0] or "mixed"
+        return "mixed", []
+    parts = [p for p in re.split(r"[_:]+", raw) if p]
+    if not parts:
+        return "mixed", []
+    return parts[0] or "mixed", parts[1:]
+
+
+def _procedural_category(name: str) -> str:
+    """
+    Parse a procedural task name into a coarse category.
+    Examples:
+      - "proc" -> "mixed"
+      - "proc_arith" / "proc:arith" -> "arith"
+      - "procedural_string" -> "string"
+    """
+    category, _tags = _procedural_spec(name)
+    return category or "mixed"
 
 
 def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoTask]:
@@ -719,7 +736,8 @@ class RepoToolEnv(BaseEnv):
         if not _is_procedural_task_name(getattr(task, "name", "")):
             return
         cfg = self.config
-        category = _procedural_category(getattr(task, "name", ""))
+        category, tags = _procedural_spec(getattr(task, "name", ""))
+        variant = "ood" if "ood" in set(t.lower() for t in tags) else "default"
         n_candidates = int(max(4, getattr(cfg, "procedural_candidates", 8) or 8))
         if n_candidates % 2 == 1:
             n_candidates += 1
@@ -734,27 +752,65 @@ class RepoToolEnv(BaseEnv):
             template = str(rng.choice(["add", "div", "power"]))
         elif category == "list":
             template = "mean"
+        elif category == "string":
+            template = "reverse"
+        elif category in ("bundle", "multifile", "multi"):
+            template = "bundle"
+        elif category in ("refactor", "rename"):
+            template = "refactor"
+        elif category in ("regression", "regress"):
+            template = "clamp"
         elif category == "mixed":
-            template = str(rng.choice(["add", "div", "power", "mean"]))
+            # keep "mixed" solvable by a single patch by default
+            template = str(rng.choice(["add", "div", "power", "mean", "reverse", "clamp"]))
         else:
             # fallback: keep it solvable and fast
             template = str(rng.choice(["add", "div", "power"]))
 
         if template == "add":
-            initial_files, patches = self._proc_task_add(rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates)
+            initial_files, patches = self._proc_task_add(
+                rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates, variant=variant
+            )
             desc = "Procedural arithmetic task: implement add(a,b) correctly."
         elif template == "div":
-            initial_files, patches = self._proc_task_div(rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates)
+            initial_files, patches = self._proc_task_div(
+                rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates, variant=variant
+            )
             desc = "Procedural arithmetic task: implement div(a,b) correctly."
         elif template == "power":
-            initial_files, patches = self._proc_task_power(rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates)
+            initial_files, patches = self._proc_task_power(
+                rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates, variant=variant
+            )
             desc = "Procedural arithmetic task: implement power(a,b) correctly."
         elif template == "mean":
-            initial_files, patches = self._proc_task_mean(rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates)
+            initial_files, patches = self._proc_task_mean(
+                rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates, variant=variant
+            )
             desc = "Procedural list task: implement mean(xs) correctly."
+        elif template == "reverse":
+            initial_files, patches = self._proc_task_reverse(rng, n_tests=n_tests, n_candidates=n_candidates, variant=variant)
+            desc = "Procedural string task: implement reverse(s) correctly."
+        elif template == "bundle":
+            initial_files, patches = self._proc_task_bundle(
+                rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates, variant=variant
+            )
+            desc = "Procedural multi-file task: fix add(a,b) and div(a,b)."
+        elif template == "refactor":
+            initial_files, patches = self._proc_task_refactor(
+                rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates, variant=variant
+            )
+            desc = "Procedural refactor task: fix core plus(a,b) and wrapper add(a,b)."
+        elif template == "clamp":
+            initial_files, patches = self._proc_task_clamp(rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates, variant=variant)
+            desc = "Procedural regression task: implement clamp(x, lo, hi) correctly."
         else:
-            initial_files, patches = self._proc_task_add(rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates)
+            initial_files, patches = self._proc_task_add(
+                rng, n_tests=n_tests, max_int=max_int, n_candidates=n_candidates, variant=variant
+            )
             desc = "Procedural arithmetic task: implement add(a,b) correctly."
+
+        if variant == "ood":
+            desc = f"{desc} (OOD variant)"
 
         task.description = desc
         task.initial_files = initial_files
@@ -794,6 +850,65 @@ class RepoToolEnv(BaseEnv):
         initial_files = {module_file: code, test_file: tests}
         return initial_files, patches
 
+    def _proc_task_reverse(
+        self,
+        rng: np.random.RandomState,
+        *,
+        n_tests: int,
+        n_candidates: int,
+        variant: str = "default",
+    ) -> Tuple[Dict[str, str], List[RepoPatch]]:
+        bug_pool = [
+            "s",
+            "\"\".join(sorted(s))",
+            "s[::1]",
+            "\"\".join(reversed(s))[1:]",
+            "s[::-1][1:]",
+        ]
+        if str(variant) == "ood":
+            bug_pool = bug_pool + ["s[1:] + s[:1]", "s[::-1] + s", "s[:-1][::-1]", "''.join(reversed(s))[:-1]"]
+        correct = "s[::-1]"
+        bug_expr = str(rng.choice(bug_pool))
+        if bug_expr == correct:
+            bug_expr = "s"
+
+        def _rand_str() -> str:
+            alphabet = "abcdxyz"
+            n = int(rng.randint(0, 8))
+            return "".join(str(rng.choice(list(alphabet))) for _ in range(n))
+
+        call_args: List[str] = []
+        expected: List[str] = []
+        # Ensure deterministic "anti-trivial" cases exist.
+        fixed = ["abc", "", "abca"]
+        for s in fixed[: max(0, min(len(fixed), int(n_tests))) ]:
+            call_args.append(repr(s))
+            expected.append(repr(s[::-1]))
+        for _ in range(max(0, int(n_tests) - len(call_args))):
+            s = _rand_str()
+            call_args.append(repr(s))
+            expected.append(repr(s[::-1]))
+
+        pool = bug_pool + [correct, "\"\".join(reversed(s))", "''.join(reversed(s))", "str().join(reversed(s))"]
+        cand_list = self._proc_pick_candidates(
+            rng,
+            required=int(n_candidates),
+            must_include=[correct],
+            pool=pool + [bug_expr],
+        )
+
+        return self._proc_make_expr_task(
+            module="text",
+            module_file="text.py",
+            test_file="test_text.py",
+            func_name="reverse",
+            args_sig="s",
+            bug_expr=bug_expr,
+            candidate_exprs=cand_list,
+            call_args=call_args,
+            expected_values=expected,
+        )
+
     def _proc_pick_candidates(
         self,
         rng: np.random.RandomState,
@@ -832,6 +947,269 @@ class RepoToolEnv(BaseEnv):
             cand[j] = s
         return cand
 
+    def _proc_task_bundle(
+        self,
+        rng: np.random.RandomState,
+        *,
+        n_tests: int,
+        max_int: int,
+        n_candidates: int,
+        variant: str = "default",
+    ) -> Tuple[Dict[str, str], List[RepoPatch]]:
+        n_total = int(max(4, n_candidates))
+        if n_total % 2 == 1:
+            n_total += 1
+        n_each = int(max(2, n_total // 2))
+
+        # add.py
+        if str(variant) == "ood":
+            bug_pool_add = ["a + b - 1", "a - b - 1", "a * b", "(a * 2) + b", "a + (b * 2)", "b - a"]
+        else:
+            bug_pool_add = ["a - b", "a + b + 1", "abs(a - b)", "a * b", "b - a"]
+        correct_add = "a + b"
+        bug_expr_add = str(rng.choice(bug_pool_add))
+        if bug_expr_add == correct_add:
+            bug_expr_add = "a - b"
+
+        call_args_add: List[str] = []
+        expected_add: List[str] = []
+        for _ in range(int(n_tests)):
+            a = int(rng.randint(-max_int, max_int + 1))
+            b = int(rng.randint(-max_int, max_int + 1))
+            call_args_add.append(f"{a}, {b}")
+            expected_add.append(str(a + b))
+
+        pool_add = bug_pool_add + [correct_add, "a", "b", "0", "a + (b * 0)"]
+        cand_add = self._proc_pick_candidates(
+            rng,
+            required=n_each,
+            must_include=[correct_add],
+            pool=pool_add + [bug_expr_add],
+        )
+        files_add, patches_add = self._proc_make_expr_task(
+            module="add",
+            module_file="add.py",
+            test_file="test_add.py",
+            func_name="add",
+            args_sig="a, b",
+            bug_expr=bug_expr_add,
+            candidate_exprs=cand_add,
+            call_args=call_args_add,
+            expected_values=expected_add,
+        )
+
+        # div.py
+        if str(variant) == "ood":
+            bug_pool_div = ["a // b", "a / (b + 2)", "(a - b) / b", "(a + b) / b", "b / (a if a != 0 else 1)"]
+        else:
+            bug_pool_div = ["a // b", "b / a", "a / (b + 1)", "a * b"]
+        correct_div = "a / b"
+        bug_expr_div = str(rng.choice(bug_pool_div))
+        if bug_expr_div == correct_div:
+            bug_expr_div = "a // b"
+
+        call_args_div: List[str] = []
+        expected_div: List[str] = []
+        # Force at least one non-integer division so '//' never passes by accident.
+        call_args_div.append("3, 2")
+        expected_div.append(repr(3 / 2))
+        for _ in range(max(0, int(n_tests) - 1)):
+            b = int(rng.randint(1, max(2, max_int) + 1))
+            a = int(rng.randint(-max_int, max_int + 1))
+            if b == 0:
+                b = 1
+            call_args_div.append(f"{a}, {b}")
+            expected_div.append(repr(a / b))
+
+        pool_div = bug_pool_div + [correct_div, "float(a) / float(b)", "a / float(b)"]
+        cand_div = self._proc_pick_candidates(
+            rng,
+            required=n_each,
+            must_include=[correct_div],
+            pool=pool_div + [bug_expr_div],
+        )
+        files_div, patches_div = self._proc_make_expr_task(
+            module="div",
+            module_file="div.py",
+            test_file="test_div.py",
+            func_name="div",
+            args_sig="a, b",
+            bug_expr=bug_expr_div,
+            candidate_exprs=cand_div,
+            call_args=call_args_div,
+            expected_values=expected_div,
+        )
+
+        initial_files = dict(files_add)
+        initial_files.update(files_div)
+
+        # Interleave add/div candidates so the two action slots can naturally cover both files.
+        patches: List[RepoPatch] = []
+        for i in range(max(len(patches_add), len(patches_div))):
+            if i < len(patches_add):
+                patches.append(patches_add[i])
+            if i < len(patches_div):
+                patches.append(patches_div[i])
+        return initial_files, patches
+
+    def _proc_task_refactor(
+        self,
+        rng: np.random.RandomState,
+        *,
+        n_tests: int,
+        max_int: int,
+        n_candidates: int,
+        variant: str = "default",
+    ) -> Tuple[Dict[str, str], List[RepoPatch]]:
+        n_total = int(max(4, n_candidates))
+        if n_total % 2 == 1:
+            n_total += 1
+        n_each = int(max(2, n_total // 2))
+
+        if str(variant) == "ood":
+            bug_pool_plus = ["a + b - 1", "a - b - 1", "a * b", "(a * 2) + b", "b - a"]
+        else:
+            bug_pool_plus = ["a - b", "a + b + 1", "abs(a - b)", "a * b", "b - a"]
+        correct_plus = "a + b"
+        bug_expr_plus = str(rng.choice(bug_pool_plus))
+        if bug_expr_plus == correct_plus:
+            bug_expr_plus = "a - b"
+
+        bug_pool_wrapper = ["plus(a, b) + 1", "plus(a, b) - 1", "(plus(a, b) + 2) - 1", "plus(a, b) * 1 + 1"]
+        if str(variant) == "ood":
+            bug_pool_wrapper = bug_pool_wrapper + ["plus(a, b) + (1 if a >= 0 else 0)"]
+        correct_add = "plus(a, b)"
+        bug_expr_add = str(rng.choice(bug_pool_wrapper))
+        if bug_expr_add == correct_add:
+            bug_expr_add = "plus(a, b) + 1"
+
+        call_args: List[str] = []
+        expected: List[str] = []
+        fixed_pairs = [(2, 3), (-1, 5), (0, 0)]
+        for a, b in fixed_pairs[: max(0, min(len(fixed_pairs), int(n_tests))) ]:
+            call_args.append(f"{a}, {b}")
+            expected.append(str(a + b))
+        for _ in range(max(0, int(n_tests) - len(call_args))):
+            a = int(rng.randint(-max_int, max_int + 1))
+            b = int(rng.randint(-max_int, max_int + 1))
+            call_args.append(f"{a}, {b}")
+            expected.append(str(a + b))
+
+        code_plus = f"def plus(a, b):\n    return {bug_expr_plus}\n"
+        code_add = f"from math_ops import plus\n\n\ndef add(a, b):\n    return {bug_expr_add}\n"
+
+        test_lines_plus: List[str] = ["from math_ops import plus", "", "", "def test_plus_cases():"]
+        for ca, exp in zip(call_args, expected):
+            test_lines_plus.append(f"    assert plus({ca}) == {exp}")
+        test_lines_plus.append("")
+
+        test_lines_add: List[str] = ["from api import add", "", "", "def test_add_cases():"]
+        for ca, exp in zip(call_args, expected):
+            test_lines_add.append(f"    assert add({ca}) == {exp}")
+        test_lines_add.append("")
+
+        initial_files = {
+            "math_ops.py": code_plus,
+            "api.py": code_add,
+            "test_math_ops.py": "\n".join(test_lines_plus),
+            "test_api.py": "\n".join(test_lines_add),
+        }
+
+        find_plus = f"return {bug_expr_plus}"
+        pool_plus = bug_pool_plus + [correct_plus, "a", "b", "0", "a + (b * 0)"]
+        cand_plus = self._proc_pick_candidates(
+            rng,
+            required=n_each,
+            must_include=[correct_plus],
+            pool=pool_plus + [bug_expr_plus],
+        )
+        patches_plus = [
+            RepoPatch(
+                name=f"plus_{i}",
+                description=f"plus: return {expr}",
+                edits=[RepoEdit(path="math_ops.py", find=find_plus, replace=f"return {expr}", count=1)],
+            )
+            for i, expr in enumerate(cand_plus)
+        ]
+
+        find_add = f"return {bug_expr_add}"
+        pool_add = bug_pool_wrapper + [correct_add, "a + b", "(a + b)", "plus(a, b) * 1"]
+        cand_add = self._proc_pick_candidates(
+            rng,
+            required=n_each,
+            must_include=[correct_add],
+            pool=pool_add + [bug_expr_add],
+        )
+        patches_add = [
+            RepoPatch(
+                name=f"add_{i}",
+                description=f"add: return {expr}",
+                edits=[RepoEdit(path="api.py", find=find_add, replace=f"return {expr}", count=1)],
+            )
+            for i, expr in enumerate(cand_add)
+        ]
+
+        # Interleave core/wrapper candidates to keep them adjacent in the default ordering.
+        patches: List[RepoPatch] = []
+        for i in range(max(len(patches_plus), len(patches_add))):
+            if i < len(patches_plus):
+                patches.append(patches_plus[i])
+            if i < len(patches_add):
+                patches.append(patches_add[i])
+        return initial_files, patches
+
+    def _proc_task_clamp(
+        self,
+        rng: np.random.RandomState,
+        *,
+        n_tests: int,
+        max_int: int,
+        n_candidates: int,
+        variant: str = "default",
+    ) -> Tuple[Dict[str, str], List[RepoPatch]]:
+        bug_pool = ["hi", "lo", "x", "min(hi, x)", "max(lo, x)", "min(hi, max(lo, x + 1))"]
+        if str(variant) == "ood":
+            bug_pool = bug_pool + ["min(hi, max(lo, x - 1))", "max(hi, min(lo, x))", "max(lo, min(hi, x + 1))"]
+        correct = "max(lo, min(hi, x))"
+        bug_expr = str(rng.choice(bug_pool))
+        if bug_expr == correct:
+            bug_expr = "x"
+
+        call_args: List[str] = []
+        expected: List[str] = []
+        for i in range(int(n_tests)):
+            lo = int(rng.randint(-max_int, max_int))
+            hi = int(rng.randint(lo + 1, lo + 1 + max(2, max_int)))
+            region = int(i % 3)
+            if region == 0:
+                x = lo - int(rng.randint(1, 4))
+            elif region == 1:
+                x = int(rng.randint(lo, hi + 1))
+            else:
+                x = hi + int(rng.randint(1, 4))
+            call_args.append(f"{x}, {lo}, {hi}")
+            expected.append(str(max(lo, min(hi, x))))
+
+        pool = bug_pool + [correct, "min(hi, max(lo, x))", "max(lo, min(hi, x))"]
+        cand_list = self._proc_pick_candidates(
+            rng,
+            required=int(n_candidates),
+            must_include=[correct],
+            pool=pool + [bug_expr],
+        )
+
+        return self._proc_make_expr_task(
+            module="util",
+            module_file="util.py",
+            test_file="test_util.py",
+            func_name="clamp",
+            args_sig="x, lo, hi",
+            bug_expr=bug_expr,
+            candidate_exprs=cand_list,
+            call_args=call_args,
+            expected_values=expected,
+        )
+
     def _proc_task_add(
         self,
         rng: np.random.RandomState,
@@ -839,8 +1217,12 @@ class RepoToolEnv(BaseEnv):
         n_tests: int,
         max_int: int,
         n_candidates: int,
+        variant: str = "default",
     ) -> Tuple[Dict[str, str], List[RepoPatch]]:
-        bug_pool = ["a - b", "a + b + 1", "abs(a - b)", "a * b", "b - a"]
+        if str(variant) == "ood":
+            bug_pool = ["a + b - 1", "a - b - 1", "a * b", "(a * 2) + b", "a + (b * 2)", "b - a"]
+        else:
+            bug_pool = ["a - b", "a + b + 1", "abs(a - b)", "a * b", "b - a"]
         correct = "a + b"
         bug_expr = str(rng.choice(bug_pool))
         # ensure bug differs from correct
@@ -883,8 +1265,12 @@ class RepoToolEnv(BaseEnv):
         n_tests: int,
         max_int: int,
         n_candidates: int,
+        variant: str = "default",
     ) -> Tuple[Dict[str, str], List[RepoPatch]]:
-        bug_pool = ["a // b", "a / (b + 1)", "a * b", "a - b"]
+        if str(variant) == "ood":
+            bug_pool = ["a // b", "a / (b + 2)", "(a - b) / b", "(a + b) / b", "a / abs(b)"]
+        else:
+            bug_pool = ["a // b", "a / (b + 1)", "a * b", "a - b"]
         correct = "a / b"
         bug_expr = str(rng.choice(bug_pool))
         if bug_expr == correct:
@@ -927,8 +1313,12 @@ class RepoToolEnv(BaseEnv):
         n_tests: int,
         max_int: int,
         n_candidates: int,
+        variant: str = "default",
     ) -> Tuple[Dict[str, str], List[RepoPatch]]:
-        bug_pool = ["a ^ b", "a * b", "a + b", "a ** (b + 1)"]
+        if str(variant) == "ood":
+            bug_pool = ["a ** (b + 2)", "a ** (b - 1)", "pow(a, b + 1)", "a ^ b", "a * b"]
+        else:
+            bug_pool = ["a ^ b", "a * b", "a + b", "a ** (b + 1)"]
         correct = "a ** b"
         bug_expr = str(rng.choice(bug_pool))
         if bug_expr == correct:
@@ -969,8 +1359,18 @@ class RepoToolEnv(BaseEnv):
         n_tests: int,
         max_int: int,
         n_candidates: int,
+        variant: str = "default",
     ) -> Tuple[Dict[str, str], List[RepoPatch]]:
-        bug_pool = ["sum(xs)", "sum(xs) // len(xs)", "(sum(xs) + len(xs)) / len(xs)", "max(xs)"]
+        if str(variant) == "ood":
+            bug_pool = [
+                "sum(xs)",
+                "sum(xs) / (len(xs) + 1)",
+                "float(sum(xs) // len(xs))",
+                "(sum(xs) + 1) / len(xs)",
+                "max(xs)",
+            ]
+        else:
+            bug_pool = ["sum(xs)", "sum(xs) // len(xs)", "(sum(xs) + len(xs)) / len(xs)", "max(xs)"]
         correct = "sum(xs) / len(xs)"
         bug_expr = str(rng.choice(bug_pool))
         if bug_expr == correct:
