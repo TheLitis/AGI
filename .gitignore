@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.vscode/
+.idea/
+logs/
+sweep_logs/
+sweep_results/*.json
+figures/
+*.png
+repo_sandboxes/
