@@ -98,6 +98,9 @@ class RepoToolEnvConfig:
     # so we reduce its penalty and optionally give a small bonus when candidates are created.
     toolloop_bootstrap_run_tests_penalty: float = -0.02
     toolloop_candidate_reward: float = 0.05
+    toolloop_run_tests_penalty: float = -0.04
+    toolloop_apply_without_candidates_penalty: float = -0.06
+    toolloop_repeat_apply_penalty: float = -0.06
 
 
 def _safe_relpath(path: str) -> str:
@@ -555,6 +558,9 @@ class RepoToolEnv(BaseEnv):
         self.current_task: Optional[RepoTask] = None
         self.steps_taken: int = 0
         self.patches_applied: List[bool] = [False, False]
+        # Track which patch index was last applied in each action slot, so we can
+        # discourage redundant "apply-spam" in tool-loop scenarios.
+        self.last_applied_patch_idx: List[Optional[int]] = [None, None]
         # Map action slots (APPLY_PATCH_0 / APPLY_PATCH_1) -> patch index in current_task.patches
         self.action_patch_indices: List[int] = [0, 1]
         # Patch navigation state (when a task has >2 patch candidates).
@@ -664,6 +670,7 @@ class RepoToolEnv(BaseEnv):
             return
         self._materialize_task(self.current_task)
         self.patches_applied = [False, False]
+        self.last_applied_patch_idx = [None, None]
         self.view_mode = 0
         self.last_test_passed = None
         self.last_tests_passed = 0
@@ -1007,6 +1014,7 @@ class RepoToolEnv(BaseEnv):
 
         self.current_task.patches = patches
         self.patches_applied = [False, False]
+        self.last_applied_patch_idx = [None, None]
         self.action_patch_indices = self._choose_action_patch_indices(self.current_task)
 
     def _switch_task(self, task_idx: int) -> None:
@@ -1017,6 +1025,7 @@ class RepoToolEnv(BaseEnv):
         self.current_scenario_name = str(self.current_task.name)
         self._maybe_generate_procedural_task(self.current_task)
         self.patches_applied = [False, False]
+        self.last_applied_patch_idx = [None, None]
         self.action_patch_indices = self._choose_action_patch_indices(self.current_task)
         self.view_mode = 0
         self.last_test_passed = None
@@ -1932,6 +1941,7 @@ class RepoToolEnv(BaseEnv):
         self.steps_taken = 0
         self._maybe_generate_procedural_task(self.current_task)
         self.patches_applied = [False, False]
+        self.last_applied_patch_idx = [None, None]
         self.action_patch_indices = self._choose_action_patch_indices(self.current_task)
         self.view_mode = 0
         self.last_test_passed = None
@@ -1951,8 +1961,11 @@ class RepoToolEnv(BaseEnv):
         if action < 0 or action >= self.n_actions:
             action = 0
 
+        cfg = self.config
+        toolloop = self._is_toolloop_task(self.current_task)
+
         self.steps_taken += 1
-        reward = float(self.config.step_penalty)
+        reward = float(cfg.step_penalty)
         done = False
         death_flag = 0.0
         alive = 1.0
@@ -1960,29 +1973,48 @@ class RepoToolEnv(BaseEnv):
         if action == 0:  # NO_OP (used as "inspect": cycle observation view)
             self._cycle_view_mode()
         elif action == 1:  # APPLY_PATCH_0
-            reward += float(self.config.apply_patch_penalty)
+            reward += float(cfg.apply_patch_penalty)
+            if toolloop:
+                if self.current_task is None or not (self.current_task.patches or []):
+                    reward += float(cfg.toolloop_apply_without_candidates_penalty)
+                else:
+                    idx0 = int(self.action_patch_indices[0]) if self.action_patch_indices else 0
+                    if self.last_applied_patch_idx[0] is not None and idx0 == int(self.last_applied_patch_idx[0]):
+                        reward += float(cfg.toolloop_repeat_apply_penalty)
             if self.current_task and self.current_task.patches:
                 idx = int(self.action_patch_indices[0]) if self.action_patch_indices else 0
                 if 0 <= idx < len(self.current_task.patches):
                     self._apply_patch(self.current_task.patches[idx])
-                self.patches_applied[0] = True
+                    self.patches_applied[0] = True
+                    self.last_applied_patch_idx[0] = int(idx)
         elif action == 2:  # APPLY_PATCH_1
-            reward += float(self.config.apply_patch_penalty)
+            reward += float(cfg.apply_patch_penalty)
+            if toolloop:
+                if self.current_task is None or not (self.current_task.patches or []):
+                    reward += float(cfg.toolloop_apply_without_candidates_penalty)
+                else:
+                    idx1 = int(self.action_patch_indices[1]) if len(self.action_patch_indices) > 1 else 1
+                    if self.last_applied_patch_idx[1] is not None and idx1 == int(self.last_applied_patch_idx[1]):
+                        reward += float(cfg.toolloop_repeat_apply_penalty)
             if self.current_task and self.current_task.patches:
                 idx = int(self.action_patch_indices[1]) if len(self.action_patch_indices) > 1 else 1
                 if 0 <= idx < len(self.current_task.patches):
                     self._apply_patch(self.current_task.patches[idx])
-                self.patches_applied[1] = True
+                    self.patches_applied[1] = True
+                    self.last_applied_patch_idx[1] = int(idx)
         elif action == 3:  # RUN_TESTS
-            cfg = self.config
-            toolloop = self._is_toolloop_task(self.current_task)
             bootstrap = bool(
                 toolloop
                 and self.current_task is not None
                 and not (self.current_task.patches or [])
                 and self.last_test_passed is None
             )
-            reward += float(cfg.toolloop_bootstrap_run_tests_penalty if bootstrap else cfg.run_tests_penalty)
+            if bootstrap:
+                reward += float(cfg.toolloop_bootstrap_run_tests_penalty)
+            elif toolloop:
+                reward += float(cfg.toolloop_run_tests_penalty)
+            else:
+                reward += float(cfg.run_tests_penalty)
             if self.workspace_dirty or self.last_test_passed is None:
                 prev_progress = float(self._progress())
                 prev_candidates = int(len(self.current_task.patches or [])) if (toolloop and self.current_task is not None) else 0
@@ -2004,15 +2036,15 @@ class RepoToolEnv(BaseEnv):
                             if new_candidates > prev_candidates:
                                 reward += float(cfg.toolloop_candidate_reward)
                 new_progress = float(self._progress())
-                reward += float(self.config.progress_reward_scale) * (new_progress - prev_progress)
+                reward += float(cfg.progress_reward_scale) * (new_progress - prev_progress)
             if self.last_test_passed:
-                reward += float(self.config.success_reward)
+                reward += float(cfg.success_reward)
                 done = True
         elif action == 4:  # REVERT
-            reward += float(self.config.revert_penalty)
+            reward += float(cfg.revert_penalty)
             self._revert()
         elif action == 5:  # CYCLE_PATCHES
-            reward += float(self.config.cycle_patches_penalty)
+            reward += float(cfg.cycle_patches_penalty)
             self._cycle_patches()
 
         if self.steps_taken >= int(self.max_steps):
