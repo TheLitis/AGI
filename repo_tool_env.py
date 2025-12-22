@@ -93,6 +93,11 @@ class RepoToolEnvConfig:
     procedural_candidates: int = 8
     procedural_test_cases: int = 6
     procedural_max_int: int = 9
+    # Tool-loop shaping (for procedural scenario tags like *_loop / *_toolloop / *_open).
+    # The first failing RUN_TESTS is necessary to populate the failure focus + candidate menu,
+    # so we reduce its penalty and optionally give a small bonus when candidates are created.
+    toolloop_bootstrap_run_tests_penalty: float = -0.02
+    toolloop_candidate_reward: float = 0.05
 
 
 def _safe_relpath(path: str) -> str:
@@ -686,7 +691,10 @@ class RepoToolEnv(BaseEnv):
             return [0, 0]
 
         order = list(range(n))
-        if bool(self.config.shuffle_patch_bindings) and n > 2:
+        shuffle = bool(self.config.shuffle_patch_bindings) and n > 2
+        if shuffle and self._is_toolloop_task(task):
+            shuffle = False
+        if shuffle:
             order = [int(x) for x in self.rng.permutation(n)]
         self.patch_order = order
         self.patch_cursor = 0
@@ -962,6 +970,9 @@ class RepoToolEnv(BaseEnv):
 
         cfg = self.config
         required = int(max(4, getattr(cfg, "procedural_candidates", 8) or 8))
+        if self._is_toolloop_task(self.current_task):
+            required = int(min(required, 4))
+            required = int(max(2, required))
         if required % 2 == 1:
             required += 1
 
@@ -971,6 +982,10 @@ class RepoToolEnv(BaseEnv):
             must_include=[str(correct)] if correct is not None else [],
             pool=pool_full,
         )
+        if correct is not None:
+            corr = str(correct)
+            if corr in cand_exprs:
+                cand_exprs = [corr] + [e for e in cand_exprs if e != corr]
 
         indent = _ws_prefix(lines[ret_idx])
         patches: List[RepoPatch] = []
@@ -1959,9 +1974,18 @@ class RepoToolEnv(BaseEnv):
                     self._apply_patch(self.current_task.patches[idx])
                 self.patches_applied[1] = True
         elif action == 3:  # RUN_TESTS
-            reward += float(self.config.run_tests_penalty)
+            cfg = self.config
+            toolloop = self._is_toolloop_task(self.current_task)
+            bootstrap = bool(
+                toolloop
+                and self.current_task is not None
+                and not (self.current_task.patches or [])
+                and self.last_test_passed is None
+            )
+            reward += float(cfg.toolloop_bootstrap_run_tests_penalty if bootstrap else cfg.run_tests_penalty)
             if self.workspace_dirty or self.last_test_passed is None:
                 prev_progress = float(self._progress())
+                prev_candidates = int(len(self.current_task.patches or [])) if (toolloop and self.current_task is not None) else 0
                 ok, passed, total, out = self._run_pytest()
                 self.last_test_passed = bool(ok)
                 self.last_tests_passed = int(passed)
@@ -1975,6 +1999,10 @@ class RepoToolEnv(BaseEnv):
                     if sig != str(self._last_failure_sig_for_candidates or "") or not (self.current_task.patches or []):
                         self._refresh_toolloop_candidates()
                         self._last_failure_sig_for_candidates = sig
+                        if self.current_task is not None:
+                            new_candidates = int(len(self.current_task.patches or []))
+                            if new_candidates > prev_candidates:
+                                reward += float(cfg.toolloop_candidate_reward)
                 new_progress = float(self._progress())
                 reward += float(self.config.progress_reward_scale) * (new_progress - prev_progress)
             if self.last_test_passed:

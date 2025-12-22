@@ -71,10 +71,12 @@
 ## Уже добавлено в коде (как база под масштаб)
 - Чекпоинты: `checkpointing.py`.
 - Флаги в `run_all.py`: `--resume-from`, `--checkpoint-path`, `--checkpoint-save-optim`.
+- Флаги в `run_all.py`: `--rl-steps`, `--stage2-updates`, `--stage4-updates`, `--eval-policy` (sample vs greedy).
 - `RepoToolEnv`: циклирование кандидатов патчей (`CYCLE_PATCHES`) + расширенный набор кандидатов.
 - `RepoToolEnv`: поддержка "микро-редактирования" через `RepoEdit` (строковые replace-правки).
 - `RepoToolEnv`: процедурные сценарии `proc_*` генерируют свежую задачу + тесты + N кандидатов патчей на каждом `reset()`.
 - `RepoToolEnv`: action `NO_OP` (0) циклирует "views" (патчи/файлы/pytest output/фокус-сниппет) для инспекции без новых действий.
 - `RepoToolEnv`: tool-loop режим `proc_*_loop` — меню кандидатов генерируется после первого падения тестов (ближе к “run → inspect → edit → rerun”).
+- `RepoToolEnv`: в `proc_*_loop` правильный фикс кладётся в первую пару кандидатов (учебный “curriculum”, чтобы агент реально начинал проходить).
 - `mixed`-пул: опционально включает `RepoToolEnv`, если задан `--repo-scenarios`.
 - Стандартная батарея бенчей: `bench.py` (быстрый режим: `python bench.py --quick`).

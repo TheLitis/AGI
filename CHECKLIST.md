@@ -19,6 +19,7 @@
 - [ ] RepoToolEnv stage4 (tool-loop candidates, multi-file): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_bundle_loop,test:proc_bundle_loop" --seed 0`.
 - [ ] RepoToolEnv stage4 (procedural, refactor multi-file): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_refactor,test:proc_refactor" --seed 0`.
 - [ ] RepoToolEnv stage4 (procedural, regression): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_regression,test:proc_regression" --seed 0`.
+- [ ] RepoToolEnv stage4 (stronger training, greedy eval): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_bundle_loop,test:proc_bundle_loop" --seed 0 --rl-steps 4096 --stage2-updates 8 --stage4-updates 8 --eval-policy greedy`.
 - [ ] RepoTool sweep: `python run_sweep.py --env-type repo --repo-scenarios "train:calc_add,test:calc_div"` (outputs `*_repo.json`), then `python analyze_sweep.py --sweep-path sweep_results/stage4_lifecycle_sweep_repo.json`.
 - [ ] Lifelong on MiniGrid: `python run_all.py --mode lifelong --env-type minigrid --seed 0` (adjust episodes if needed).
 - [ ] Enable regime-aware replay when debugging forgetting: add `--regime-aware-replay`.

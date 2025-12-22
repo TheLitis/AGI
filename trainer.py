@@ -3446,7 +3446,11 @@ class Trainer:
             err_cur = self.agent.world_model.curiosity_error(
                 z_next, H_next_in, z_hat, H_hat
             )
-            cur_r = (curiosity_beta * err_cur.detach()).item()
+            env_family = info.get("env_family") if isinstance(info, dict) else None
+            if curiosity_beta > 0.0 and str(env_family or "") != "repo-basic":
+                cur_r = (curiosity_beta * err_cur.detach()).item()
+            else:
+                cur_r = 0.0
 
             reward_total = reward_env + cur_r
 
@@ -3758,9 +3762,10 @@ class Trainer:
         beta_conflict: float = 0.0,
         beta_uncertainty: float = 0.0,
         planning_coef: float = 0.0,
+        regime_name: Optional[str] = None,
     ):
         """Stage 2 or 4: A2C policy/value training (self/planner toggled by args)."""
-        self.current_regime_name = "stage4"
+        self.current_regime_name = str(regime_name or ("stage4" if use_self else "stage2"))
         # Optional: enable autograd anomaly detection when debugging inplace issues
         if getattr(self, "debug_autograd", False):
             torch.autograd.set_detect_anomaly(True)
@@ -4574,6 +4579,7 @@ class Trainer:
         max_steps: int = 200,
         use_self: bool = False,
         planning_coef: float = 0.0,
+        eval_policy: str = "sample",
     ):
         """
         Оценка политики с учётом multi-env, self-модели и планировщика.
@@ -4609,6 +4615,10 @@ class Trainer:
                     env_tensor.shape[0], in_dim, device=self.device, dtype=torch.float32
                 )
             return env_desc
+
+        eval_policy_norm = (eval_policy or "sample").lower()
+        if eval_policy_norm not in {"sample", "greedy"}:
+            eval_policy_norm = "sample"
 
         def _run_eval(split_use_self: bool) -> Dict[str, Any]:
             returns = []
@@ -4784,8 +4794,11 @@ class Trainer:
                                 )
                                 logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
 
-                            dist = Categorical(logits=logits)
-                            action = dist.sample()
+                            if eval_policy_norm == "greedy":
+                                action = torch.argmax(logits, dim=-1)
+                            else:
+                                dist = Categorical(logits=logits)
+                                action = dist.sample()
 
                     next_obs, _, done, info = self.env.step(action.item())
                     reward_env = self.compute_preference_reward(info)

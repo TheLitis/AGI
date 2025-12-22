@@ -382,6 +382,9 @@ def run_experiment(
     log_dir: Optional[str] = None,
     run_id: Optional[str] = None,
     n_steps: int = 1024,
+    stage2_updates: int = 1,
+    stage4_updates: int = 1,
+    eval_policy: str = "sample",
     gamma: float = 0.99,
     entropy_coef: float = 0.003,
     curiosity_beta: float = 0.1,
@@ -538,6 +541,9 @@ def run_experiment(
         )
 
     mode = (mode or "all").lower()
+    eval_policy = (eval_policy or "sample").lower()
+    if eval_policy not in {"sample", "greedy"}:
+        eval_policy = "sample"
     stage_metrics: Dict[str, Any] = {}
     stage_metrics["trait_reflection_debug"] = trainer.trait_reflection_debug
     use_self_flag = agent_variant != "no_self"
@@ -557,6 +563,7 @@ def run_experiment(
         max_steps=200,
         use_self=False,
         planning_coef=0.0,
+        eval_policy=eval_policy,
     )
 
     # Stage 1: random exploration + world model
@@ -580,21 +587,25 @@ def run_experiment(
 
     # Stage 2: policy without self
     if mode in {"all", "stage2", "stage3", "stage3b", "stage3c", "stage4", "lifelong", "lifelong_train"}:
-        trainer.train_policy_a2c(
-            n_steps=n_steps,
-            gamma=gamma,
-            entropy_coef=entropy_coef,
-            use_self=False,
-            curiosity_beta=curiosity_beta,
-            beta_conflict=beta_conflict,
-            beta_uncertainty=beta_uncertainty,
-            planning_coef=0.0,
-        )
+        n_updates = int(max(1, stage2_updates))
+        for _ in range(n_updates):
+            trainer.train_policy_a2c(
+                n_steps=n_steps,
+                gamma=gamma,
+                entropy_coef=entropy_coef,
+                use_self=False,
+                curiosity_beta=curiosity_beta,
+                beta_conflict=beta_conflict,
+                beta_uncertainty=beta_uncertainty,
+                planning_coef=0.0,
+                regime_name="stage2",
+            )
         stage_metrics["eval_after_stage2"] = trainer.evaluate(
             n_episodes=20,
             max_steps=200,
             use_self=False,
             planning_coef=0.0,
+            eval_policy=eval_policy,
         )
         if train_latent_flag and trainer.skill_library is not None and trainer.n_latent_skills > 0:
             trainer.train_latent_skills_supervised()
@@ -628,12 +639,14 @@ def run_experiment(
             max_steps=200,
             use_self=False,
             planning_coef=0.0,
+            eval_policy=eval_policy,
         )
         stage_metrics["eval_after_stage3_self"] = trainer.evaluate(
             n_episodes=20,
             max_steps=200,
             use_self=True,
             planning_coef=0.0,
+            eval_policy=eval_policy,
         )
         if mode == "stage3":
             _attach_trait_logs()
@@ -658,12 +671,14 @@ def run_experiment(
             max_steps=200,
             use_self=False,
             planning_coef=0.0,
+            eval_policy=eval_policy,
         )
         stage_metrics["eval_after_stage3c_self"] = trainer.evaluate(
             n_episodes=20,
             max_steps=200,
             use_self=True,
             planning_coef=0.0,
+            eval_policy=eval_policy,
         )
         if mode == "stage3b":
             _attach_trait_logs()
@@ -703,12 +718,14 @@ def run_experiment(
             max_steps=200,
             use_self=False,
             planning_coef=0.0,
+            eval_policy=eval_policy,
         )
         stage_metrics["eval_after_stage3c_self"] = trainer.evaluate(
             n_episodes=20,
             max_steps=200,
             use_self=True,
             planning_coef=0.0,
+            eval_policy=eval_policy,
         )
         if mode in {"stage3c"}:
             _attach_trait_logs()
@@ -729,27 +746,32 @@ def run_experiment(
     if mode in {"all", "stage4", "lifelong", "lifelong_train"}:
         planning_coef_eff = planning_coef if use_self_flag else 0.0
 
-        trainer.train_policy_a2c(
-            n_steps=n_steps,
-            gamma=gamma,
-            entropy_coef=entropy_coef,
-            use_self=use_self_flag,
-            curiosity_beta=curiosity_beta,
-            beta_conflict=beta_conflict,
-            beta_uncertainty=beta_uncertainty,
-            planning_coef=planning_coef_eff,
-        )
+        n_updates = int(max(1, stage4_updates))
+        for _ in range(n_updates):
+            trainer.train_policy_a2c(
+                n_steps=n_steps,
+                gamma=gamma,
+                entropy_coef=entropy_coef,
+                use_self=use_self_flag,
+                curiosity_beta=curiosity_beta,
+                beta_conflict=beta_conflict,
+                beta_uncertainty=beta_uncertainty,
+                planning_coef=planning_coef_eff,
+                regime_name="stage4",
+            )
         stage_metrics["eval_after_stage4_self"] = trainer.evaluate(
             n_episodes=20,
             max_steps=200,
             use_self=True,
             planning_coef=planning_coef_eff,
+            eval_policy=eval_policy,
         )
         stage_metrics["eval_after_stage4_no_self"] = trainer.evaluate(
             n_episodes=20,
             max_steps=200,
             use_self=False,
             planning_coef=planning_coef_eff,
+            eval_policy=eval_policy,
         )
         stage_metrics["self_model_probe_after_stage4"] = trainer.probe_self_model(gamma=gamma)
 
@@ -760,6 +782,7 @@ def run_experiment(
             max_steps=200,
             use_self=False,
             planning_coef=planning_coef_eff,
+            eval_policy=eval_policy,
         )
 
         env_pool.set_phase("B")
@@ -768,12 +791,14 @@ def run_experiment(
             max_steps=200,
             use_self=False,
             planning_coef=planning_coef_eff,
+            eval_policy=eval_policy,
         )
         stage_metrics["lifecycle_phaseB_self"] = trainer.evaluate(
             n_episodes=20,
             max_steps=200,
             use_self=True,
             planning_coef=planning_coef_eff,
+            eval_policy=eval_policy,
         )
 
         env_pool.set_phase("C")
@@ -782,12 +807,14 @@ def run_experiment(
             max_steps=200,
             use_self=False,
             planning_coef=planning_coef_eff,
+            eval_policy=eval_policy,
         )
         stage_metrics["lifecycle_phaseC_self"] = trainer.evaluate(
             n_episodes=20,
             max_steps=200,
             use_self=True,
             planning_coef=planning_coef_eff,
+            eval_policy=eval_policy,
         )
         # Online Phase C adaptation (Phase D)
         reflect_enabled = agent_variant == "full"
@@ -853,6 +880,7 @@ def run_experiment(
         "planning_horizon": planning_horizon,
         "planner_mode": planner_mode,
         "planner_rollouts": planner_rollouts,
+        "eval_policy": eval_policy,
         "meta_conflict_ma": trainer.meta_conflict_ma,
         "meta_uncertainty_ma": trainer.meta_uncertainty_ma,
         "max_steps_env": env_pool.max_steps,
@@ -878,6 +906,9 @@ def run_experiment(
             "planner_mode": planner_mode,
             "planner_rollouts": planner_rollouts,
             "n_steps": n_steps,
+            "stage2_updates": int(max(1, stage2_updates)),
+            "stage4_updates": int(max(1, stage4_updates)),
+            "eval_policy": eval_policy,
             "gamma": gamma,
             "entropy_coef": entropy_coef,
             "curiosity_beta": curiosity_beta,

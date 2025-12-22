@@ -51,6 +51,14 @@ def test_repo_tool_env_toolloop_bundle_dynamic_is_solvable(tmp_path):
     assert info0["last_test_passed"] is False
     assert env.current_task.patches, "tool-loop scenarios should generate candidates after first failing test run"
 
+    # Curriculum: the correct fix should be present in the first visible pair.
+    focus0 = getattr(env, "focus_func", None)
+    desired0 = "a + b" if focus0 == "add" else "a / b"
+    i0, i1 = env.action_patch_indices[0], env.action_patch_indices[1]
+    d0 = (env.current_task.patches[i0].description or "") if 0 <= i0 < len(env.current_task.patches) else ""
+    d1 = (env.current_task.patches[i1].description or "") if 0 <= i1 < len(env.current_task.patches) else ""
+    assert desired0 in d0 or desired0 in d1
+
     # Solve: fix whichever function is currently failing, then rerun tests until all pass.
     for _ in range(6):
         if env.last_test_passed is True:
@@ -65,4 +73,3 @@ def test_repo_tool_env_toolloop_bundle_dynamic_is_solvable(tmp_path):
             break
 
     assert env.last_test_passed is True
-

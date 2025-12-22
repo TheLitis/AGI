@@ -39,6 +39,10 @@ def main(
     resume_from: str = None,
     checkpoint_path: str = None,
     checkpoint_save_optim: bool = None,
+    rl_steps: int = None,
+    stage2_updates: int = None,
+    stage4_updates: int = None,
+    eval_policy: str = None,
 ):
     is_cli = len(sys.argv) > 1 and seed is None and mode is None
 
@@ -222,6 +226,31 @@ def main(
             default=0.5,
             help="When --regime-aware-replay is enabled, fraction of samples drawn from the current regime.",
         )
+        parser.add_argument(
+            "--rl-steps",
+            type=int,
+            default=1024,
+            help="Number of on-policy steps per A2C update in stage2/stage4.",
+        )
+        parser.add_argument(
+            "--stage2-updates",
+            type=int,
+            default=1,
+            help="How many A2C updates to run in stage2 (policy without self-model).",
+        )
+        parser.add_argument(
+            "--stage4-updates",
+            type=int,
+            default=1,
+            help="How many A2C updates to run in stage4 (policy with self-model/planner).",
+        )
+        parser.add_argument(
+            "--eval-policy",
+            type=str,
+            default="sample",
+            choices=["sample", "greedy"],
+            help="Evaluation action selection: sample (stochastic) or greedy (argmax).",
+        )
         args = parser.parse_args()
 
         seed = args.seed
@@ -251,6 +280,10 @@ def main(
         resume_from = args.resume_from
         checkpoint_path = args.checkpoint_path
         checkpoint_save_optim = args.checkpoint_save_optim
+        rl_steps = args.rl_steps
+        stage2_updates = args.stage2_updates
+        stage4_updates = args.stage4_updates
+        eval_policy = args.eval_policy
     else:
         if seed is None:
             seed = 0
@@ -301,6 +334,14 @@ def main(
             checkpoint_path = None
         if checkpoint_save_optim is None:
             checkpoint_save_optim = False
+        if rl_steps is None:
+            rl_steps = 1024
+        if stage2_updates is None:
+            stage2_updates = 1
+        if stage4_updates is None:
+            stage4_updates = 1
+        if eval_policy is None:
+            eval_policy = "sample"
 
     scenario_list = None
     if minigrid_scenarios:
@@ -324,6 +365,10 @@ def main(
         repo_scenarios=repo_list,
         regime_aware_replay=regime_aware_replay,
         replay_frac_current=replay_frac_current,
+        n_steps=int(rl_steps),
+        stage2_updates=int(stage2_updates),
+        stage4_updates=int(stage4_updates),
+        eval_policy=eval_policy,
         skill_mode=skill_mode,
         n_latent_skills=n_latent_skills,
         train_latent_skills=train_latent_skills,
