@@ -105,6 +105,7 @@ class RepoToolEnvConfig:
     toolloop_idle_with_candidates_penalty: float = -0.02
     toolloop_apply_ready_reward: float = 0.03
     toolloop_run_after_apply_reward: float = 0.03
+    toolloop_revert_without_patch_penalty: float = -0.08
 
 
 def _safe_relpath(path: str) -> str:
@@ -1021,6 +1022,31 @@ class RepoToolEnv(BaseEnv):
         self.last_applied_patch_idx = [None, None]
         self.action_patch_indices = self._choose_action_patch_indices(self.current_task)
 
+    def _bootstrap_toolloop_state(self) -> None:
+        """
+        For tool-loop tasks, run the initial failing test once at reset so the
+        agent starts with a failure focus + candidate menu.
+        """
+        if self.current_task is None or self.workdir is None:
+            return
+        if not self._is_toolloop_task(self.current_task):
+            return
+        if self.last_test_passed is not None:
+            return
+        ok, passed, total, out = self._run_pytest()
+        self.last_test_passed = bool(ok)
+        self.last_tests_passed = int(passed)
+        self.last_tests_total = int(total)
+        self.last_pytest_output = out
+        self.workspace_dirty = False
+        self._env_descriptor = self._compute_env_descriptor()
+        self._update_failure_focus()
+        if not bool(ok):
+            sig = _pytest_failure_signature(out)
+            if sig != str(self._last_failure_sig_for_candidates or "") or not (self.current_task.patches or []):
+                self._refresh_toolloop_candidates()
+                self._last_failure_sig_for_candidates = sig
+
     def _switch_task(self, task_idx: int) -> None:
         task_idx = int(task_idx) % len(self.task_set)
         self.current_task_idx = task_idx
@@ -1042,6 +1068,7 @@ class RepoToolEnv(BaseEnv):
         self._last_failure_sig_for_candidates = ""
         self._materialize_task(self.current_task)
         self._env_descriptor = self._compute_env_descriptor()
+        self._bootstrap_toolloop_state()
 
     def _maybe_generate_procedural_task(self, task: Optional[RepoTask]) -> None:
         """
@@ -1958,6 +1985,7 @@ class RepoToolEnv(BaseEnv):
         self._last_failure_sig_for_candidates = ""
         self._materialize_task(self.current_task)
         self._env_descriptor = self._compute_env_descriptor()
+        self._bootstrap_toolloop_state()
         return self._get_obs(last_action=0)
 
     def step(self, action: int) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
@@ -2063,6 +2091,8 @@ class RepoToolEnv(BaseEnv):
                 done = True
         elif action == 4:  # REVERT
             reward += float(cfg.revert_penalty)
+            if toolloop and not any(self.patches_applied):
+                reward += float(cfg.toolloop_revert_without_patch_penalty)
             self._revert()
         elif action == 5:  # CYCLE_PATCHES
             reward += float(cfg.cycle_patches_penalty)

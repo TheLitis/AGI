@@ -43,13 +43,8 @@ def test_repo_tool_env_toolloop_bundle_dynamic_is_solvable(tmp_path):
     env.reset(scenario_id=0)
     assert env.current_task is not None
     assert env.current_task.initial_files
-    assert env.current_task.patches == [], "tool-loop scenarios should start without a patch menu"
-
-    # First run fails and should generate candidates keyed to the focused failure.
-    _, _, done0, info0 = env.step(3)  # RUN_TESTS
-    assert done0 is False
-    assert info0["last_test_passed"] is False
-    assert env.current_task.patches, "tool-loop scenarios should generate candidates after first failing test run"
+    assert env.last_test_passed is False
+    assert env.current_task.patches, "tool-loop scenarios should bootstrap candidates at reset"
 
     # Curriculum: the correct fix should be present in the first visible pair.
     focus0 = getattr(env, "focus_func", None)
