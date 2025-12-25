@@ -106,6 +106,10 @@ class RepoToolEnvConfig:
     toolloop_apply_ready_reward: float = 0.03
     toolloop_run_after_apply_reward: float = 0.03
     toolloop_revert_without_patch_penalty: float = -0.08
+    toolloop_action_mask: bool = True
+    toolloop_action_mask_allow_cycle: bool = False
+    toolloop_action_mask_allow_revert: bool = False
+    toolloop_action_mask_anneal_episodes: int = 100
 
 
 def _safe_relpath(path: str) -> str:
@@ -562,6 +566,7 @@ class RepoToolEnv(BaseEnv):
         self.current_task_idx: int = 0
         self.current_task: Optional[RepoTask] = None
         self.steps_taken: int = 0
+        self.episode_idx: int = 0
         self.patches_applied: List[bool] = [False, False]
         # Track which patch index was last applied in each action slot, so we can
         # discourage redundant "apply-spam" in tool-loop scenarios.
@@ -581,6 +586,7 @@ class RepoToolEnv(BaseEnv):
         self.last_tests_total: int = 0
         self.last_pytest_output: str = ""
         self.workspace_dirty: bool = True
+        self.action_mask_enabled: bool = True
         # Failure focus state (used for inspection/tool-loop support).
         self.focus_func: Optional[str] = None
         self.focus_file: Optional[str] = None
@@ -1954,6 +1960,49 @@ class RepoToolEnv(BaseEnv):
             ],
         }
 
+    def set_action_mask_enabled(self, enabled: bool) -> None:
+        self.action_mask_enabled = bool(enabled)
+
+    def get_action_mask_enabled(self) -> bool:
+        return bool(getattr(self, "action_mask_enabled", True))
+
+    def get_action_mask(self) -> np.ndarray:
+        mask = np.ones((self.n_actions,), dtype=np.float32)
+        cfg = self.config
+        if not bool(getattr(cfg, "toolloop_action_mask", False)):
+            return mask
+        if not bool(getattr(self, "action_mask_enabled", True)):
+            return mask
+        if not self._is_toolloop_task(self.current_task):
+            return mask
+        if self.last_test_passed is True:
+            return mask
+        anneal = int(getattr(cfg, "toolloop_action_mask_anneal_episodes", 0) or 0)
+        if anneal > 0 and int(getattr(self, "episode_idx", 0)) > anneal:
+            return mask
+
+        has_candidates = bool(self.current_task and self.current_task.patches)
+        if self.last_test_passed is None or not has_candidates:
+            mask[:] = 0.0
+            mask[3] = 1.0  # RUN_TESTS
+            return mask
+
+        if self.workspace_dirty:
+            mask[:] = 0.0
+            mask[3] = 1.0  # RUN_TESTS
+            return mask
+
+        mask[:] = 0.0
+        mask[1] = 1.0  # APPLY_PATCH_0
+        mask[2] = 1.0  # APPLY_PATCH_1
+        if bool(getattr(cfg, "toolloop_action_mask_allow_cycle", False)):
+            mask[5] = 1.0
+        if bool(getattr(cfg, "toolloop_action_mask_allow_revert", False)):
+            mask[4] = 1.0
+        if not np.any(mask):
+            return np.ones((self.n_actions,), dtype=np.float32)
+        return mask
+
     def get_env_descriptor(self) -> np.ndarray:
         return np.array(self._env_descriptor, copy=True)
 
@@ -1961,6 +2010,7 @@ class RepoToolEnv(BaseEnv):
     def reset(self, seed: Optional[int] = None, scenario_id: Optional[int] = None) -> Dict[str, Any]:
         if seed is not None:
             self.rng.seed(seed)
+        self.episode_idx += 1
         if scenario_id is None:
             self.current_task_idx = int(self.rng.randint(0, len(self.task_set)))
         else:

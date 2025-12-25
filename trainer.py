@@ -436,6 +436,36 @@ class Trainer:
             )
         return self.env_descriptors[env_ids]
 
+    def _get_action_mask_tensor(self) -> Optional[torch.Tensor]:
+        env = self.env
+        if not hasattr(env, "get_action_mask"):
+            return None
+        try:
+            mask = env.get_action_mask()
+        except Exception:
+            return None
+        if mask is None:
+            return None
+        mask_arr = np.asarray(mask, dtype=np.bool_)
+        if mask_arr.ndim == 1:
+            mask_arr = mask_arr.reshape(1, -1)
+        return torch.from_numpy(mask_arr).to(self.device)
+
+    def _apply_action_mask(self, logits: torch.Tensor) -> torch.Tensor:
+        mask = self._get_action_mask_tensor()
+        if mask is None:
+            return logits
+        if mask.shape[-1] != logits.shape[-1]:
+            return logits
+        if mask.shape[0] != logits.shape[0]:
+            if mask.shape[0] == 1:
+                mask = mask.expand(logits.shape[0], -1)
+            else:
+                return logits
+        if not torch.any(mask):
+            return logits
+        return logits.masked_fill(~mask, -1.0e9)
+
     def _compute_env_max_steps_by_id(self) -> torch.Tensor:
         """
         Build a stable per-env-id max_steps table (float32 tensor on self.device).
@@ -1778,6 +1808,7 @@ class Trainer:
                     delta_self = torch.zeros_like(R_self) if not use_self else torch.tanh(R_self - V_pi)
                     G_t = self.agent.workspace(W_t, S_t, H_t, V_pi, delta_self, U_t, traits, M)
                     logits = self.agent.policy(G_t)
+                    logits = self._apply_action_mask(logits)
                     dist = Categorical(logits=logits)
                     action = dist.sample()
 
@@ -3384,6 +3415,7 @@ class Trainer:
                 # fallback to primitive policy if skill selection failed
                 if action is None:
                     logits = self.agent.policy(G_t)
+                    logits = self._apply_action_mask(logits)
                     dist = Categorical(logits=logits)
                     action = dist.sample()
                     logprob = dist.log_prob(action)
@@ -3404,6 +3436,7 @@ class Trainer:
                     planner_used_steps += 1
                     logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
 
+                logits = self._apply_action_mask(logits)
                 dist = Categorical(logits=logits)
                 action = dist.sample()
                 logprob = dist.log_prob(action)
@@ -3977,6 +4010,7 @@ class Trainer:
                         )
                         logits = torch.nan_to_num(logits, nan=0.0, posinf=0.0, neginf=0.0)
 
+                    logits = self._apply_action_mask(logits)
                     dist = Categorical(logits=logits)
                     action = dist.sample()
 
@@ -4620,6 +4654,14 @@ class Trainer:
         if eval_policy_norm not in {"sample", "greedy"}:
             eval_policy_norm = "sample"
 
+        mask_applied = False
+        if hasattr(self.env, "set_action_mask_enabled"):
+            try:
+                self.env.set_action_mask_enabled(False)
+                mask_applied = True
+            except Exception:
+                mask_applied = False
+
         def _run_eval(split_use_self: bool) -> Dict[str, Any]:
             returns = []
             lengths = []
@@ -4779,6 +4821,7 @@ class Trainer:
                             )
                             if action is None:
                                 logits = self.agent.policy(G_t)
+                                logits = self._apply_action_mask(logits)
                                 dist = Categorical(logits=logits)
                                 action = dist.sample()
                         else:
@@ -4794,6 +4837,7 @@ class Trainer:
                                 )
                                 logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
 
+                            logits = self._apply_action_mask(logits)
                             if eval_policy_norm == "greedy":
                                 action = torch.argmax(logits, dim=-1)
                             else:
@@ -4982,7 +5026,13 @@ class Trainer:
                     metrics["repo_test_steps_to_pass"] = [int(x) for x in repo_steps_to_pass_test]
             return metrics
 
-        return _run_eval(bool(use_self))
+        results = _run_eval(bool(use_self))
+        if mask_applied and hasattr(self.env, "set_action_mask_enabled"):
+            try:
+                self.env.set_action_mask_enabled(True)
+            except Exception:
+                pass
+        return results
 
     # =========================
     #  Online Phase C adaptation (Phase D)
@@ -5132,6 +5182,7 @@ class Trainer:
                         )
                         logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
 
+                    logits = self._apply_action_mask(logits)
                     dist = Categorical(logits=logits)
                     action = dist.sample()
 
@@ -5904,6 +5955,7 @@ class Trainer:
                             )
                             if action is None:
                                 logits = self.agent.policy(G_t)
+                                logits = self._apply_action_mask(logits)
                                 dist = Categorical(logits=logits)
                                 action = dist.sample()
                         else:
@@ -5919,6 +5971,7 @@ class Trainer:
                                 )
                                 logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
 
+                            logits = self._apply_action_mask(logits)
                             dist = Categorical(logits=logits)
                             action = dist.sample()
 
@@ -6459,6 +6512,7 @@ class Trainer:
                             )
                             logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
 
+                        logits = self._apply_action_mask(logits)
                         dist = Categorical(logits=logits)
                         action = dist.sample()
 
@@ -6773,6 +6827,7 @@ class Trainer:
                     )
 
                     logits = self.agent.policy(G_t)
+                    logits = self._apply_action_mask(logits)
                     dist = Categorical(logits=logits)
                     action = dist.sample()
 

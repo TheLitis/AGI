@@ -819,6 +819,25 @@ class EnvPool(BaseEnv):
             "obs_fields": ["patch", "energy", "scenario_id", "env_id"],
         }
 
+    def get_action_mask(self) -> Optional[np.ndarray]:
+        if self.active_env_idx is None:
+            return None
+        env = self.envs[self.active_env_idx]
+        if hasattr(env, "get_action_mask"):
+            try:
+                return env.get_action_mask()
+            except Exception:
+                return None
+        return None
+
+    def set_action_mask_enabled(self, enabled: bool) -> None:
+        for env in self.envs:
+            if hasattr(env, "set_action_mask_enabled"):
+                try:
+                    env.set_action_mask_enabled(enabled)
+                except Exception:
+                    continue
+
     def get_env_descriptor(self, env_id: int) -> np.ndarray:
         return self.envs[env_id].get_env_descriptor()
 
