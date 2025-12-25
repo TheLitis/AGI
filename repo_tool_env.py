@@ -109,7 +109,7 @@ class RepoToolEnvConfig:
     toolloop_action_mask: bool = True
     toolloop_action_mask_allow_cycle: bool = False
     toolloop_action_mask_allow_revert: bool = False
-    toolloop_action_mask_anneal_episodes: int = 100
+    toolloop_action_mask_anneal_episodes: int = 0
 
 
 def _safe_relpath(path: str) -> str:

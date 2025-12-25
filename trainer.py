@@ -286,6 +286,9 @@ class Trainer:
         self.safety = SelfReflectionSafetyConfig()
         self.latent_skill_training = LatentSkillTrainingConfig()
         self.last_self_probe: Optional[SelfModelProbeStats] = None
+        # When environments expose an action-mask (e.g. tool UIs), we can still train the
+        # policy to "internalize" invalid actions by penalizing probability mass outside the mask.
+        self.action_mask_internalization_coef: float = 0.10
         self._trait_safety_ctx: Dict[str, Dict[str, Any]] = {}
 
         descriptors = None
@@ -451,18 +454,24 @@ class Trainer:
             mask_arr = mask_arr.reshape(1, -1)
         return torch.from_numpy(mask_arr).to(self.device)
 
-    def _apply_action_mask(self, logits: torch.Tensor) -> torch.Tensor:
+    def _get_action_mask_for_logits(self, logits: torch.Tensor) -> Optional[torch.Tensor]:
         mask = self._get_action_mask_tensor()
         if mask is None:
-            return logits
+            return None
         if mask.shape[-1] != logits.shape[-1]:
-            return logits
+            return None
         if mask.shape[0] != logits.shape[0]:
             if mask.shape[0] == 1:
                 mask = mask.expand(logits.shape[0], -1)
             else:
-                return logits
+                return None
         if not torch.any(mask):
+            return None
+        return mask
+
+    def _apply_action_mask(self, logits: torch.Tensor) -> torch.Tensor:
+        mask = self._get_action_mask_for_logits(logits)
+        if mask is None:
             return logits
         return logits.masked_fill(~mask, -1.0e9)
 
@@ -3275,6 +3284,7 @@ class Trainer:
         entropies_buf = torch.empty(n_steps, dtype=torch.float32, device=self.device)
         conflicts_buf = torch.empty(n_steps, dtype=torch.float32, device=self.device)
         uncertainties_buf = torch.empty(n_steps, dtype=torch.float32, device=self.device)
+        invalid_action_mass_buf = torch.empty(n_steps, dtype=torch.float32, device=self.device)
 
         step_idx = 0
         planner_used_steps = 0
@@ -3323,6 +3333,7 @@ class Trainer:
 
             traits = self._mixed_traits()
             M = self.agent.memory
+            invalid_action_mass = torch.zeros(1, device=self.device, dtype=torch.float32)
 
             # ---- SelfModel ----
             if use_self:
@@ -3414,14 +3425,22 @@ class Trainer:
                 )
                 # fallback to primitive policy if skill selection failed
                 if action is None:
-                    logits = self.agent.policy(G_t)
-                    logits = self._apply_action_mask(logits)
+                    logits_raw = self.agent.policy(G_t)
+                    mask = self._get_action_mask_for_logits(logits_raw)
+                    if mask is not None and torch.any(~mask):
+                        probs = torch.softmax(logits_raw, dim=-1)
+                        invalid_action_mass = (probs * (~mask).to(probs.dtype)).sum(dim=-1)
+                    else:
+                        invalid_action_mass = torch.zeros(
+                            logits_raw.shape[0], device=logits_raw.device, dtype=torch.float32
+                        )
+                    logits = logits_raw.masked_fill(~mask, -1.0e9) if mask is not None else logits_raw
                     dist = Categorical(logits=logits)
                     action = dist.sample()
                     logprob = dist.log_prob(action)
                     entropy = dist.entropy()
             else:
-                logits = self.agent.policy(G_t)  # (1, n_actions)
+                logits_raw = self.agent.policy(G_t)  # (1, n_actions)
 
                 # ---- planner (????????????? _get_planner_logits) ----
                 if planning_coef > 0.0:
@@ -3434,9 +3453,17 @@ class Trainer:
                             M=M,
                         )
                     planner_used_steps += 1
-                    logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
+                    logits_raw = (1.0 - planning_coef) * logits_raw + planning_coef * planner_logits
 
-                logits = self._apply_action_mask(logits)
+                mask = self._get_action_mask_for_logits(logits_raw)
+                if mask is not None and torch.any(~mask):
+                    probs = torch.softmax(logits_raw, dim=-1)
+                    invalid_action_mass = (probs * (~mask).to(probs.dtype)).sum(dim=-1)
+                else:
+                    invalid_action_mass = torch.zeros(
+                        logits_raw.shape[0], device=logits_raw.device, dtype=torch.float32
+                    )
+                logits = logits_raw.masked_fill(~mask, -1.0e9) if mask is not None else logits_raw
                 dist = Categorical(logits=logits)
                 action = dist.sample()
                 logprob = dist.log_prob(action)
@@ -3496,6 +3523,7 @@ class Trainer:
             entropies_buf[step_idx] = entropy.view(-1)
             conflicts_buf[step_idx] = conf_t.view(-1)
             uncertainties_buf[step_idx] = U_t.view(-1)
+            invalid_action_mass_buf[step_idx] = invalid_action_mass.view(-1)
 
             got_food = 1.0 if info.get("got_food", False) else 0.0
             took_damage = 1.0 if info.get("took_damage", False) else 0.0
@@ -3553,6 +3581,7 @@ class Trainer:
         entropies_t = entropies_buf[:step_idx]
         conflicts_t = conflicts_buf[:step_idx]
         uncertainties_t = uncertainties_buf[:step_idx]
+        invalid_action_mass_t = invalid_action_mass_buf[:step_idx]
 
         # logging/diagnostics (planner usage)
         self.last_planner_usage_steps = int(planner_used_steps)
@@ -3568,6 +3597,7 @@ class Trainer:
             entropies_t,
             conflicts_t,
             uncertainties_t,
+            invalid_action_mass_t,
         )
 
     # =========================
@@ -3731,6 +3761,7 @@ class Trainer:
         entropy_coef: float,
         beta_conflict: float,
         beta_uncertainty: float,
+        invalid_action_mass: Optional[torch.Tensor] = None,
         regularization_coef: float = 0.0,
         optimizer: Optional[torch.optim.Optimizer] = None,
     ) -> Dict[str, float]:
@@ -3765,6 +3796,9 @@ class Trainer:
         entropy_coef_eff = self.get_adaptive_entropy_coef(entropy_coef)
 
         loss = policy_loss + 0.5 * value_loss - entropy_coef_eff * entropy + aux_penalty
+        invalid_coef = float(getattr(self, "action_mask_internalization_coef", 0.0) or 0.0)
+        if invalid_action_mass is not None and invalid_coef > 0.0:
+            loss = loss + invalid_coef * invalid_action_mass.mean()
         if regularization_coef > 0.0:
             loss = loss + self._fast_param_l2_penalty(regularization_coef)
 
@@ -3783,6 +3817,10 @@ class Trainer:
             "entropy_coef_eff": float(entropy_coef_eff),
             "mean_conflict": float(conflicts_t.mean().item()),
             "mean_uncertainty": float(uncertainties_t.mean().item()),
+            "mean_invalid_action_mass": float(invalid_action_mass.mean().item())
+            if invalid_action_mass is not None
+            else 0.0,
+            "invalid_action_coef": float(invalid_coef),
         }
 
     def train_policy_a2c(
@@ -3816,6 +3854,7 @@ class Trainer:
             entropies,
             conflicts,
             uncertainties,
+            invalid_action_mass,
         ) = self.collect_onpolicy_experience(
             n_steps=n_steps,
             use_self=use_self,
@@ -3833,6 +3872,7 @@ class Trainer:
             entropies=entropies,
             conflicts=conflicts,
             uncertainties=uncertainties,
+            invalid_action_mass=invalid_action_mass,
             gamma=gamma,
             entropy_coef=entropy_coef,
             beta_conflict=beta_conflict,
@@ -3857,9 +3897,11 @@ class Trainer:
         meta_uncertainty_ma = float(self.meta_uncertainty_ma)
         planner_usage_frac = float(getattr(self, "last_planner_usage_frac", 0.0))
         entropy_eff = stats.get("entropy_coef_eff", entropy_coef)
+        mean_invalid_mass = float(stats.get("mean_invalid_action_mass", 0.0))
         print(
             f"[A2C] use_self={use_self} | "
-            f"mean_conflict={mean_conflict:.4f}, mean_uncertainty={mean_uncertainty:.4f} | "
+            f"mean_conflict={mean_conflict:.4f}, mean_uncertainty={mean_uncertainty:.4f}, "
+            f"mean_invalid_mass={mean_invalid_mass:.4f} | "
             f"meta_conflict_ma={meta_conflict_ma:.4f}, meta_uncertainty_ma={meta_uncertainty_ma:.4f} | "
             f"entropy_coef_eff={entropy_eff:.5f}, curiosity_beta_eff={cur_beta_eff:.5f}, "
             f"planning_coef_eff={planning_coef_eff:.5f}, planner_usage_frac={planner_usage_frac:.3f} | "
@@ -4654,15 +4696,23 @@ class Trainer:
         if eval_policy_norm not in {"sample", "greedy"}:
             eval_policy_norm = "sample"
 
-        mask_applied = False
-        if hasattr(self.env, "set_action_mask_enabled"):
+        mask_supported = hasattr(self.env, "set_action_mask_enabled")
+        prev_mask_enabled: Optional[bool] = None
+        if mask_supported and hasattr(self.env, "get_action_mask_enabled"):
             try:
-                self.env.set_action_mask_enabled(False)
-                mask_applied = True
+                prev_mask_enabled = bool(self.env.get_action_mask_enabled())
             except Exception:
-                mask_applied = False
+                prev_mask_enabled = None
 
-        def _run_eval(split_use_self: bool) -> Dict[str, Any]:
+        def _set_mask_enabled(enabled: bool) -> None:
+            if not mask_supported:
+                return
+            try:
+                self.env.set_action_mask_enabled(bool(enabled))
+            except Exception:
+                pass
+
+        def _run_eval(split_use_self: bool, mask_label: str) -> Dict[str, Any]:
             returns = []
             lengths = []
             foods = []
@@ -4932,7 +4982,7 @@ class Trainer:
             mean_damage = float(np.mean(damages)) if damages else 0.0
 
             print(
-                f"Eval (use_self={split_use_self}, planning_coef={planning_coef:.2f}): "
+                f"Eval[{mask_label}] (use_self={split_use_self}, planning_coef={planning_coef:.2f}): "
                 f"mean return = {mean_ret:.3f} ± {std_ret:.3f}, "
                 f"mean length = {mean_len:.1f}, "
                 f"mean food = {mean_food:.2f}, "
@@ -5026,12 +5076,33 @@ class Trainer:
                     metrics["repo_test_steps_to_pass"] = [int(x) for x in repo_steps_to_pass_test]
             return metrics
 
-        results = _run_eval(bool(use_self))
-        if mask_applied and hasattr(self.env, "set_action_mask_enabled"):
-            try:
-                self.env.set_action_mask_enabled(True)
-            except Exception:
-                pass
+        # Primary eval: respect/enable the environment's action-mask UI (if present).
+        _set_mask_enabled(True)
+        results = _run_eval(bool(use_self), mask_label="masked" if mask_supported else "default")
+
+        # Secondary eval: measure "internalization" without mask (robustness).
+        if mask_supported:
+            _set_mask_enabled(False)
+            unmasked = _run_eval(bool(use_self), mask_label="unmasked")
+            results["unmasked"] = unmasked
+            for key in (
+                "mean_return",
+                "std_return",
+                "mean_length",
+                "train_mean_return",
+                "test_mean_return",
+                "repo_pass_rate",
+                "repo_train_pass_rate",
+                "repo_test_pass_rate",
+            ):
+                if key in unmasked:
+                    results[f"unmasked_{key}"] = unmasked[key]
+
+        # Restore prior mask state if we could read it; otherwise default to enabled.
+        if prev_mask_enabled is not None:
+            _set_mask_enabled(prev_mask_enabled)
+        else:
+            _set_mask_enabled(True)
         return results
 
     # =========================
