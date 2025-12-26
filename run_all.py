@@ -31,6 +31,7 @@ def main(
     planning_coef: float = None,
     beta_conflict: float = None,
     beta_uncertainty: float = None,
+    action_mask_internalization_coef: float = None,
     computer_scenarios: str = None,
     repo_scenarios: str = None,
     skill_mode: str = None,
@@ -144,6 +145,15 @@ def main(
             type=float,
             default=0.05,
             help="Regularizer weight for uncertainty penalty in A2C loss.",
+        )
+        parser.add_argument(
+            "--invalid-action-coef",
+            type=float,
+            default=0.10,
+            help=(
+                "Penalty weight for probability mass on invalid actions when the environment exposes an action mask "
+                "(helps the policy 'internalize' tool UI constraints)."
+            ),
         )
         parser.add_argument(
             "--use-skills",
@@ -266,6 +276,7 @@ def main(
         planning_coef = args.planning_coef
         beta_conflict = args.beta_conflict
         beta_uncertainty = args.beta_uncertainty
+        action_mask_internalization_coef = args.invalid_action_coef
         agent_variant = args.agent_variant
         lifelong_episodes_per_chapter = args.lifelong_episodes_per_chapter
         use_skills = args.use_skills
@@ -307,6 +318,8 @@ def main(
             beta_conflict = 0.05
         if beta_uncertainty is None:
             beta_uncertainty = 0.05
+        if action_mask_internalization_coef is None:
+            action_mask_internalization_coef = 0.10
         if agent_variant is None:
             agent_variant = "full"
         if lifelong_episodes_per_chapter is None:
@@ -381,6 +394,7 @@ def main(
         planning_coef=planning_coef,
         beta_conflict=beta_conflict,
         beta_uncertainty=beta_uncertainty,
+        action_mask_internalization_coef=float(action_mask_internalization_coef),
         log_dir=log_dir,
         run_id=run_id,
         lifelong_episodes_per_chapter=lifelong_episodes_per_chapter,

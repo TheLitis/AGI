@@ -194,6 +194,7 @@ class Trainer:
         planner_rollouts: int = 4,
         safety_threshold: float = 0.0,
         safety_penalty_coef: float = 1.0,
+        action_mask_internalization_coef: float = 0.10,
         train_env_ids: Optional[list] = None,
         test_env_ids: Optional[list] = None,
         env_descriptors: Optional[torch.Tensor] = None,
@@ -288,7 +289,7 @@ class Trainer:
         self.last_self_probe: Optional[SelfModelProbeStats] = None
         # When environments expose an action-mask (e.g. tool UIs), we can still train the
         # policy to "internalize" invalid actions by penalizing probability mass outside the mask.
-        self.action_mask_internalization_coef: float = 0.10
+        self.action_mask_internalization_coef = float(action_mask_internalization_coef)
         self._trait_safety_ctx: Dict[str, Dict[str, Any]] = {}
 
         descriptors = None

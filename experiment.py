@@ -391,6 +391,7 @@ def run_experiment(
     beta_conflict: float = 0.05,
     beta_uncertainty: float = 0.05,
     planning_coef: float = 0.3,
+    action_mask_internalization_coef: float = 0.10,
     lifelong_episodes_per_chapter: int = 50,
     use_skills: bool = False,
     skill_mode: str = "handcrafted",
@@ -429,7 +430,8 @@ def run_experiment(
         "[Config] "
         f"planner_mode={planner_mode}, planner_rollouts={planner_rollouts}, "
         f"planning_coef={planning_coef:.3f}, "
-        f"beta_conflict={beta_conflict:.3f}, beta_uncertainty={beta_uncertainty:.3f}"
+        f"beta_conflict={beta_conflict:.3f}, beta_uncertainty={beta_uncertainty:.3f}, "
+        f"invalid_action_coef={action_mask_internalization_coef:.3f}"
     )
 
     env_choice = (env_type or "gridworld").lower()
@@ -529,6 +531,7 @@ def run_experiment(
         replay_frac_current=replay_frac_current,
         skill_mode=skill_mode,
         n_latent_skills=n_latent_skills,
+        action_mask_internalization_coef=action_mask_internalization_coef,
     )
 
     if resume_from:
@@ -915,6 +918,7 @@ def run_experiment(
             "beta_conflict": beta_conflict,
             "beta_uncertainty": beta_uncertainty,
             "planning_coef": planning_coef,
+            "action_mask_internalization_coef": action_mask_internalization_coef,
             "use_self": use_self_flag if mode in {"all", "stage4"} else agent_variant != "no_self",
             "use_planner": planning_coef > 0.0,
             "do_self_reflection": agent_variant == "full",
