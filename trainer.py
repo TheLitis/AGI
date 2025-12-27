@@ -3799,7 +3799,12 @@ class Trainer:
         loss = policy_loss + 0.5 * value_loss - entropy_coef_eff * entropy + aux_penalty
         invalid_coef = float(getattr(self, "action_mask_internalization_coef", 0.0) or 0.0)
         if invalid_action_mass is not None and invalid_coef > 0.0:
-            loss = loss + invalid_coef * invalid_action_mass.mean()
+            # Encourage the policy to internalize the action mask even when actions are sampled
+            # from the masked distribution. Using a KL-style barrier is stronger than a linear
+            # penalty on invalid mass when valid_mass is small:
+            #   KL(masked||raw) = -log(sum_a p_raw(a) * mask(a)) = -log(valid_mass)
+            valid_mass = (1.0 - invalid_action_mass).clamp(min=1.0e-6, max=1.0)
+            loss = loss + invalid_coef * (-torch.log(valid_mass)).mean()
         if regularization_coef > 0.0:
             loss = loss + self._fast_param_l2_penalty(regularization_coef)
 
