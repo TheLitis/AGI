@@ -107,7 +107,7 @@ class RepoToolEnvConfig:
     toolloop_run_after_apply_reward: float = 0.03
     toolloop_revert_without_patch_penalty: float = -0.08
     toolloop_action_mask: bool = True
-    toolloop_action_mask_allow_cycle: bool = False
+    toolloop_action_mask_allow_cycle: bool = True
     toolloop_action_mask_allow_revert: bool = False
     toolloop_action_mask_anneal_episodes: int = 0
 
@@ -1000,10 +1000,6 @@ class RepoToolEnv(BaseEnv):
             must_include=[str(correct)] if correct is not None else [],
             pool=pool_full,
         )
-        if correct is not None:
-            corr = str(correct)
-            if corr in cand_exprs:
-                cand_exprs = [corr] + [e for e in cand_exprs if e != corr]
 
         indent = _ws_prefix(lines[ret_idx])
         patches: List[RepoPatch] = []
