@@ -3281,16 +3281,20 @@ class Trainer:
         last_action = torch.zeros(1, dtype=torch.long, device=self.device)
         last_reward = 0.0
 
-        # Preallocate buffers on device to avoid per-step tensor creation churn
+        # Preallocate non-differentiable buffers on device to avoid per-step tensor churn.
+        # NOTE: Do NOT store differentiable tensors (logprobs/values/entropy/etc.) into a
+        # preallocated tensor, because that breaks the autograd graph and makes A2C a no-op.
         actions_buf = torch.empty(n_steps, dtype=torch.long, device=self.device)
         rewards_buf = torch.empty(n_steps, dtype=torch.float32, device=self.device)
         dones_buf = torch.empty(n_steps, dtype=torch.float32, device=self.device)
-        values_buf = torch.empty(n_steps, dtype=torch.float32, device=self.device)
-        logprobs_buf = torch.empty(n_steps, dtype=torch.float32, device=self.device)
-        entropies_buf = torch.empty(n_steps, dtype=torch.float32, device=self.device)
-        conflicts_buf = torch.empty(n_steps, dtype=torch.float32, device=self.device)
-        uncertainties_buf = torch.empty(n_steps, dtype=torch.float32, device=self.device)
-        invalid_action_mass_buf = torch.empty(n_steps, dtype=torch.float32, device=self.device)
+
+        # Keep differentiable signals as lists of tensors (preserves autograd graphs).
+        values_list: List[torch.Tensor] = []
+        logprobs_list: List[torch.Tensor] = []
+        entropies_list: List[torch.Tensor] = []
+        conflicts_list: List[torch.Tensor] = []
+        uncertainties_list: List[torch.Tensor] = []
+        invalid_action_mass_list: List[torch.Tensor] = []
 
         step_idx = 0
         planner_used_steps = 0
@@ -3530,16 +3534,16 @@ class Trainer:
 
             reward_total = reward_env + cur_r
 
-            # логируем для RL (in-place in preallocated buffers)
+            # Log for RL.
             actions_buf[step_idx] = action
             rewards_buf[step_idx] = reward_total
             dones_buf[step_idx] = float(done)
-            values_buf[step_idx] = V_pi.view(-1)
-            logprobs_buf[step_idx] = logprob.view(-1)
-            entropies_buf[step_idx] = entropy.view(-1)
-            conflicts_buf[step_idx] = conf_t.view(-1)
-            uncertainties_buf[step_idx] = U_t.view(-1)
-            invalid_action_mass_buf[step_idx] = invalid_action_mass.view(-1)
+            values_list.append(V_pi.view(-1))
+            logprobs_list.append(logprob.view(-1))
+            entropies_list.append(entropy.view(-1))
+            conflicts_list.append(conf_t.view(-1))
+            uncertainties_list.append(U_t.view(-1))
+            invalid_action_mass_list.append(invalid_action_mass.view(-1))
 
             got_food = 1.0 if info.get("got_food", False) else 0.0
             took_damage = 1.0 if info.get("took_damage", False) else 0.0
@@ -3570,7 +3574,9 @@ class Trainer:
             energy = energy_next
             scenario_id = scenario_next_id
             env_id = env_next_id
-            h_w = h_w_new
+            # Detach recurrent state so we don't backprop through time across the whole rollout.
+            # A2C here is not meant to do full BPTT through the world-model GRU.
+            h_w = h_w_new.detach()
 
             last_reward = reward_env
             last_action = action.detach()
@@ -3592,12 +3598,14 @@ class Trainer:
         actions_t = actions_buf[:step_idx]
         rewards_total_t = rewards_buf[:step_idx]
         dones_t = dones_buf[:step_idx]
-        values_t = values_buf[:step_idx]
-        logprobs_t = logprobs_buf[:step_idx]
-        entropies_t = entropies_buf[:step_idx]
-        conflicts_t = conflicts_buf[:step_idx]
-        uncertainties_t = uncertainties_buf[:step_idx]
-        invalid_action_mass_t = invalid_action_mass_buf[:step_idx]
+        if step_idx <= 0:
+            raise RuntimeError("collect_onpolicy_experience collected 0 steps; cannot train A2C.")
+        values_t = torch.cat(values_list, dim=0)
+        logprobs_t = torch.cat(logprobs_list, dim=0)
+        entropies_t = torch.cat(entropies_list, dim=0)
+        conflicts_t = torch.cat(conflicts_list, dim=0)
+        uncertainties_t = torch.cat(uncertainties_list, dim=0)
+        invalid_action_mass_t = torch.cat(invalid_action_mass_list, dim=0)
 
         # logging/diagnostics (planner usage)
         self.last_planner_usage_steps = int(planner_used_steps)
@@ -3788,9 +3796,11 @@ class Trainer:
         conflicts_t = conflicts if conflicts is not None else torch.zeros_like(rewards)
         uncertainties_t = uncertainties if uncertainties is not None else torch.zeros_like(rewards)
 
+        # Compute GAE targets from a detached critic to avoid backprop-through-time
+        # across the whole rollout (stabilizes A2C and keeps graphs small).
         advantages, returns_t = self._compute_gae(
             rewards=rewards,
-            values=values,
+            values=values.detach(),
             dones=dones,
             gamma=gamma,
             gae_lambda=0.95,
@@ -3805,7 +3815,7 @@ class Trainer:
         advantages_norm = (advantages - adv_mean) / adv_std
 
         policy_loss = -(advantages_norm.detach() * logprobs).mean()
-        value_loss = advantages_norm.pow(2).mean()
+        value_loss = (returns_t - values).pow(2).mean()
         entropy = entropies.mean()
 
         aux_penalty = beta_conflict * conflicts_t.mean() + beta_uncertainty * uncertainties_t.mean()

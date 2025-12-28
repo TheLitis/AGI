@@ -1,6 +1,6 @@
 # ROADMAP: от текущего прототипа к «более реальному» AGI
 
-Обновлено: 2025-12-26 (RepoToolEnv tool-loop стабилизирован; добавлены метрики masked/unmasked и обучение “интернализации”).
+Обновлено: 2025-12-28 (исправлен баг A2C: дифференцируемые logprob/value/invalid_mass теряли autograd при записи в preallocated буферы; теперь A2C + “интернализация маски” реально обучаются. RepoToolEnv tool-loop стабилизирован; есть метрики masked/unmasked и механика интернализации).
 
 Ниже — честная декомпозиция «что уже есть» и «чего не хватает» относительно 8 “технических гор” из `AGENTS.md`, плюс приоритетный план работ, который можно делать итеративно в этом репозитории.
 
@@ -84,6 +84,7 @@
 - `RepoToolEnv`: в `proc_*_loop` правильный фикс **не** форсируется в первой паре — агент должен уметь искать через `CYCLE_PATCHES` (и держать протокол действий без UI-маски).
 - `RepoToolEnv`: action-mask для tool-loop, чтобы отключать “нелепые” действия в неподходящей фазе (реалистичный UI вместо жёстких запретов).
 - `trainer.evaluate()`: печатает/возвращает `Eval[masked]` и `Eval[unmasked]` (компетентность vs интернализация).
-- `trainer.train_policy_a2c()`: KL-барьер на маску `-log(valid_mass)` (где `valid_mass = 1 - mean_invalid_mass`) + опциональный `--action-mask-dropout` (иногда учимся действовать без маски) — вместе уменьшают разрыв `masked` vs `unmasked` (настраивается `--invalid-action-coef` и `--action-mask-dropout`).
+- `trainer.train_policy_a2c()`: KL-барьер на маску `-log(valid_mass)` (где `valid_mass = 1 - mean_invalid_mass`) + опциональный `--action-mask-dropout` (иногда учимся действовать без маски); GAE/targets считаются от `values.detach()` (без BPTT по rollout) — вместе это уменьшает разрыв `masked` vs `unmasked` (настраивается `--invalid-action-coef` и `--action-mask-dropout`).
+- `trainer.collect_onpolicy_experience()`: хранит logprob/value/entropy/invalid_mass как список тензоров (а не числовой буфер), чтобы не ломать autograd; рекуррентное состояние `h_w` detatchится между шагами (без BPTT на весь rollout).
 - `mixed`-пул: опционально включает `RepoToolEnv`, если задан `--repo-scenarios`.
 - Стандартная батарея бенчей: `bench.py` (быстрый режим: `python bench.py --quick`).
