@@ -81,9 +81,9 @@
 - `RepoToolEnv`: процедурные сценарии `proc_*` генерируют свежую задачу + тесты + N кандидатов патчей на каждом `reset()`.
 - `RepoToolEnv`: action `NO_OP` (0) циклирует "views" (патчи/файлы/pytest output/фокус-сниппет) для инспекции без новых действий.
 - `RepoToolEnv`: tool-loop режим `proc_*_loop` — меню кандидатов генерируется после первого падения тестов (ближе к “run → inspect → edit → rerun”).
-- `RepoToolEnv`: в `proc_*_loop` правильный фикс кладётся в первую пару кандидатов (учебный “curriculum”, чтобы агент реально начинал проходить).
+- `RepoToolEnv`: в `proc_*_loop` правильный фикс **не** форсируется в первой паре — агент должен уметь искать через `CYCLE_PATCHES` (и держать протокол действий без UI-маски).
 - `RepoToolEnv`: action-mask для tool-loop, чтобы отключать “нелепые” действия в неподходящей фазе (реалистичный UI вместо жёстких запретов).
 - `trainer.evaluate()`: печатает/возвращает `Eval[masked]` и `Eval[unmasked]` (компетентность vs интернализация).
-- `trainer.train_policy_a2c()`: KL-барьер на маску `-log(valid_mass)` (где `valid_mass = 1 - mean_invalid_mass`) — заставляет политику “выучить” запреты, а не полагаться на маску (настраивается флагом `--invalid-action-coef`).
+- `trainer.train_policy_a2c()`: KL-барьер на маску `-log(valid_mass)` (где `valid_mass = 1 - mean_invalid_mass`) + опциональный `--action-mask-dropout` (иногда учимся действовать без маски) — вместе уменьшают разрыв `masked` vs `unmasked` (настраивается `--invalid-action-coef` и `--action-mask-dropout`).
 - `mixed`-пул: опционально включает `RepoToolEnv`, если задан `--repo-scenarios`.
 - Стандартная батарея бенчей: `bench.py` (быстрый режим: `python bench.py --quick`).

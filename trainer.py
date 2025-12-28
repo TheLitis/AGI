@@ -195,6 +195,7 @@ class Trainer:
         safety_threshold: float = 0.0,
         safety_penalty_coef: float = 1.0,
         action_mask_internalization_coef: float = 0.10,
+        action_mask_dropout_prob: float = 0.0,
         train_env_ids: Optional[list] = None,
         test_env_ids: Optional[list] = None,
         env_descriptors: Optional[torch.Tensor] = None,
@@ -290,6 +291,10 @@ class Trainer:
         # When environments expose an action-mask (e.g. tool UIs), we can still train the
         # policy to "internalize" invalid actions by penalizing probability mass outside the mask.
         self.action_mask_internalization_coef = float(action_mask_internalization_coef)
+        try:
+            self.action_mask_dropout_prob = max(0.0, min(1.0, float(action_mask_dropout_prob)))
+        except Exception:
+            self.action_mask_dropout_prob = 0.0
         self._trait_safety_ctx: Dict[str, Dict[str, Any]] = {}
 
         descriptors = None
@@ -3435,7 +3440,12 @@ class Trainer:
                         invalid_action_mass = torch.zeros(
                             logits_raw.shape[0], device=logits_raw.device, dtype=torch.float32
                         )
-                    logits = logits_raw.masked_fill(~mask, -1.0e9) if mask is not None else logits_raw
+                    apply_mask = True
+                    dropout_p = float(getattr(self, "action_mask_dropout_prob", 0.0) or 0.0)
+                    if dropout_p > 0.0 and mask is not None and torch.any(~mask):
+                        if torch.rand((), device=logits_raw.device).item() < dropout_p:
+                            apply_mask = False
+                    logits = logits_raw.masked_fill(~mask, -1.0e9) if (apply_mask and mask is not None) else logits_raw
                     dist = Categorical(logits=logits)
                     action = dist.sample()
                     logprob = dist.log_prob(action)
@@ -3464,7 +3474,12 @@ class Trainer:
                     invalid_action_mass = torch.zeros(
                         logits_raw.shape[0], device=logits_raw.device, dtype=torch.float32
                     )
-                logits = logits_raw.masked_fill(~mask, -1.0e9) if mask is not None else logits_raw
+                apply_mask = True
+                dropout_p = float(getattr(self, "action_mask_dropout_prob", 0.0) or 0.0)
+                if dropout_p > 0.0 and mask is not None and torch.any(~mask):
+                    if torch.rand((), device=logits_raw.device).item() < dropout_p:
+                        apply_mask = False
+                logits = logits_raw.masked_fill(~mask, -1.0e9) if (apply_mask and mask is not None) else logits_raw
                 dist = Categorical(logits=logits)
                 action = dist.sample()
                 logprob = dist.log_prob(action)
