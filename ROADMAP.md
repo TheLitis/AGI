@@ -2,6 +2,12 @@
 
 Обновлено: 2025-12-28 (исправлен баг A2C: дифференцируемые logprob/value/invalid_mass теряли autograd при записи в preallocated буферы; теперь A2C + “интернализация маски” реально обучаются. RepoToolEnv tool-loop стабилизирован; есть метрики masked/unmasked и механика интернализации).
 
+## Gates (Definition of Done checkpoints)
+
+- Gate 0: AGI-Bench Suite + единый JSON-репорт + AGI Score (suites/core/tools/…).
+- Gate 1: B1 mask_pred + BC expert для RepoToolEnv, закрытие gap masked/unmasked.
+- Gate 2: B2 open-actions + proc_*_open в RepoToolEnv.
+
 Ниже — честная декомпозиция «что уже есть» и «чего не хватает» относительно 8 “технических гор” из `AGENTS.md`, плюс приоритетный план работ, который можно делать итеративно в этом репозитории.
 
 ## Где проект сейчас (кратко)

@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AGI Bench Report",
+  "type": "object",
+  "required": [
+    "meta",
+    "overall",
+    "suites"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "meta": {
+      "type": "object",
+      "required": [
+        "timestamp",
+        "git_commit",
+        "seed_list",
+        "config"
+      ],
+      "properties": {
+        "timestamp": {
+          "type": "integer"
+        },
+        "git_commit": {
+          "type": "string"
+        },
+        "seed_list": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "suite": {
+          "type": "string"
+        },
+        "ood": {
+          "type": "boolean"
+        },
+        "quick": {
+          "type": "boolean"
+        },
+        "config": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "overall": {
+      "type": "object",
+      "required": [
+        "agi_score",
+        "notes",
+        "gates"
+      ],
+      "properties": {
+        "agi_score": {
+          "type": "number"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gates": {
+          "type": "object",
+          "properties": {
+            "gate0": {
+              "type": "string"
+            },
+            "gate1": {
+              "type": "string"
+            },
+            "gate2": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "suites": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "metrics",
+          "per_env"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "metrics": {
+            "type": "object"
+          },
+          "per_env": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "env": {
+                  "type": "string"
+                },
+                "seed": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "pass": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "steps": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "invalid_rate": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

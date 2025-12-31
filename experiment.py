@@ -393,6 +393,8 @@ def run_experiment(
     planning_coef: float = 0.3,
     action_mask_internalization_coef: float = 0.10,
     action_mask_dropout_prob: float = 0.0,
+    stage1_steps: int = 5000,
+    stage1_batches: int = 200,
     lifelong_episodes_per_chapter: int = 50,
     use_skills: bool = False,
     skill_mode: str = "handcrafted",
@@ -420,6 +422,7 @@ def run_experiment(
         n_steps, gamma, entropy_coef, curiosity_beta, beta_conflict, beta_uncertainty,
         planning_coef: RL hyperparameters (kept identical to original code).
         train_latent_skills: whether to run Stage 2.5 latent skill distillation (auto-enables for latent/mixed skills if None).
+        stage1_steps, stage1_batches: world-model pretraining limits (for quick runs).
 
     Returns:
         Dict with "config" and "stage_metrics" plus metadata; all values are JSON-safe.
@@ -574,8 +577,8 @@ def run_experiment(
 
     # Stage 1: random exploration + world model
     if mode in {"all", "stage1", "stage2", "stage3", "stage3b", "stage3c", "stage4", "lifelong", "lifelong_train"}:
-        trainer.collect_random_experience(n_steps=5000)
-        trainer.train_world_model()
+        trainer.collect_random_experience(n_steps=int(stage1_steps))
+        trainer.train_world_model(n_batches=int(stage1_batches))
         if mode == "stage1":
             _attach_trait_logs()
             result = {

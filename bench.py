@@ -1,8 +1,5 @@
 """
-Small benchmark battery runner for the proto-creature AGI project.
-
-Goal: make progress measurable across env families (gridworld/minigrid/repo/mixed)
-without rewriting ad-hoc commands each time.
+AGI-Bench runner: standardized suites, JSON report, and a skeleton AGI score.
 """
 
 from __future__ import annotations
@@ -10,12 +7,17 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from experiment import run_experiment
+
+SCHEMA_VERSION = "0.1"
+SUITE_ORDER = ["core", "tools", "tools_open", "language", "social", "lifelong", "safety"]
 
 
 def _sanitize(obj: Any) -> Any:
@@ -37,6 +39,45 @@ def _split_csv(value: Optional[str]) -> Optional[List[str]]:
     return parts or None
 
 
+def _parse_seeds(values: Optional[List[str]]) -> List[int]:
+    if not values:
+        return [0, 1]
+    raw: List[str] = []
+    for item in values:
+        raw.extend([p for p in str(item).split(",") if p.strip()])
+    seeds: List[int] = []
+    for tok in raw:
+        try:
+            seeds.append(int(tok))
+        except ValueError:
+            continue
+    return seeds or [0, 1]
+
+
+def _safe_mean(values: List[float]) -> Optional[float]:
+    clean = [v for v in values if v is not None and math.isfinite(float(v))]
+    if not clean:
+        return None
+    return float(sum(clean) / len(clean))
+
+
+def _geometric_mean(values: List[float]) -> Optional[float]:
+    clean = [v for v in values if v is not None and v >= 0.0]
+    if not clean:
+        return None
+    if any(v <= 0.0 for v in clean):
+        return 0.0
+    return float(math.exp(sum(math.log(v) for v in clean) / len(clean)))
+
+
+def _git_commit() -> str:
+    try:
+        out = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.STDOUT)
+        return out.decode("utf-8", errors="replace").strip()
+    except Exception:
+        return "unknown"
+
+
 @dataclass(frozen=True)
 class BenchCase:
     name: str
@@ -44,51 +85,248 @@ class BenchCase:
     minigrid_scenarios: Optional[List[str]] = None
     computer_scenarios: Optional[List[str]] = None
     repo_scenarios: Optional[List[str]] = None
+    description: str = ""
 
 
-DEFAULT_CASES: List[BenchCase] = [
-    BenchCase(name="gridworld", env_type="gridworld"),
-    BenchCase(name="instruction", env_type="instruction"),
-    BenchCase(name="social", env_type="social"),
-    BenchCase(
-        name="minigrid",
-        env_type="minigrid",
-        minigrid_scenarios=["minigrid-empty", "minigrid-doorkey", "test:minigrid-lavacrossing"],
-    ),
-    BenchCase(
-        name="repo",
-        env_type="repo",
-        repo_scenarios=["train:calc_add", "train:calc_pow", "test:calc_div", "test:calc_bundle"],
-    ),
-    BenchCase(
-        name="mixed",
-        env_type="mixed",
-        minigrid_scenarios=["minigrid-empty", "minigrid-doorkey"],
-        computer_scenarios=["simple_project", "refactor_project"],
-        repo_scenarios=["train:calc_add", "test:calc_div"],
-    ),
-]
+@dataclass(frozen=True)
+class SuiteSpec:
+    name: str
+    cases: List[BenchCase]
+    implemented: bool = True
+    description: str = ""
+
+
+SUITE_METRICS_KEYS: Dict[str, List[str]] = {
+    "core": [
+        "mean_return",
+        "test_mean_return",
+        "ood_gap",
+    ],
+    "tools": [
+        "pass_rate_masked",
+        "pass_rate_unmasked",
+        "mean_steps_to_pass_unmasked",
+        "invalid_action_rate",
+        "mask_pred_f1",
+        "mask_pred_auc",
+        "bc_pretrain_used",
+        "action_mask_dropout_prob",
+        "mean_invalid_mass",
+        "ood_gap",
+    ],
+    "tools_open": [
+        "pass_rate_unmasked",
+        "mean_steps_to_pass_unmasked",
+        "invalid_action_rate",
+        "ood_gap",
+    ],
+    "language": [
+        "pass_rate",
+        "ood_pass_rate",
+        "causal_drop",
+    ],
+    "social": [
+        "success_rate",
+        "transfer_rate",
+    ],
+    "lifelong": [
+        "forgetting_gap",
+        "forward_transfer",
+    ],
+    "safety": [
+        "safety_planner_ok",
+        "constraint_compliance",
+        "catastrophic_fail_rate",
+    ],
+}
+
+
+def _metric_template(name: str) -> Dict[str, Any]:
+    keys = SUITE_METRICS_KEYS.get(name, [])
+    return {k: None for k in keys}
+
+
+def _case_label(case: BenchCase) -> str:
+    if case.env_type == "repo":
+        scenarios = ",".join(case.repo_scenarios or [])
+        return f"repo_tool_env/{scenarios or case.name}"
+    if case.env_type == "tools":
+        return "tool_env/basic"
+    if case.env_type == "minigrid":
+        scenarios = ",".join(case.minigrid_scenarios or [])
+        return f"minigrid/{scenarios or case.name}"
+    if case.env_type == "gridworld":
+        return "gridworld/basic"
+    return f"{case.env_type}/{case.name}"
+
+
+def _extract_eval_metrics(run_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    stage_metrics = run_result.get("stage_metrics", {}) if isinstance(run_result, dict) else {}
+    eval_self = stage_metrics.get("eval_after_stage4_self")
+    if isinstance(eval_self, dict):
+        return eval_self
+    return None
+
+
+def _extract_repo_metrics(eval_metrics: Optional[Dict[str, Any]]) -> Tuple[Optional[float], Optional[float], List[int]]:
+    if not eval_metrics:
+        return None, None, []
+    pass_masked = eval_metrics.get("repo_pass_rate")
+    pass_unmasked = None
+    steps_unmasked: List[int] = []
+    if isinstance(eval_metrics.get("unmasked"), dict):
+        unmasked = eval_metrics.get("unmasked", {})
+        pass_unmasked = unmasked.get("repo_pass_rate")
+        steps_unmasked = [int(x) for x in unmasked.get("repo_steps_to_pass", []) if isinstance(x, (int, float))]
+    elif "unmasked_repo_pass_rate" in eval_metrics:
+        pass_unmasked = eval_metrics.get("unmasked_repo_pass_rate")
+    return pass_masked, pass_unmasked, steps_unmasked
+
+
+def _tools_score(
+    pass_unmasked: Optional[float],
+    invalid_action_rate: Optional[float],
+    mean_steps_unmasked: Optional[float],
+    invalid_target: float = 0.01,
+    steps_target: float = 12.0,
+) -> Optional[float]:
+    if pass_unmasked is None:
+        return None
+    pass_component = max(0.0, min(1.0, float(pass_unmasked)))
+    if invalid_action_rate is None:
+        invalid_component = 1.0
+    else:
+        invalid_component = max(0.0, min(1.0, 1.0 - float(invalid_action_rate) / float(invalid_target)))
+    if mean_steps_unmasked is None or mean_steps_unmasked <= 0.0:
+        steps_component = 1.0
+    else:
+        steps_component = max(0.0, min(1.0, float(steps_target) / float(mean_steps_unmasked)))
+    return float(pass_component * invalid_component * steps_component)
+
+
+def _run_safety_smoke() -> Dict[str, Any]:
+    try:
+        import torch
+        from trainer import Trainer
+
+        class _Dummy:
+            safety_threshold = 0.5
+            safety_penalty_coef = 2.0
+
+        scores_main = torch.tensor([1.0, 1.0])
+        scores_safety = torch.tensor([0.1, 0.6])
+        penalized = Trainer._apply_safety_penalty(_Dummy(), scores_main, scores_safety)
+        ok = bool(penalized[1] > penalized[0])
+    except Exception:
+        ok = False
+    return {
+        "safety_planner_ok": ok,
+        "constraint_compliance": None,
+        "catastrophic_fail_rate": None,
+    }
+
+
+def _build_suite_specs(
+    *,
+    minigrid_override: Optional[List[str]],
+    computer_override: Optional[List[str]],
+    repo_override: Optional[List[str]],
+    ood: bool,
+) -> Dict[str, SuiteSpec]:
+    minigrid_scenarios = minigrid_override or [
+        "minigrid-empty",
+        "minigrid-doorkey",
+        "test:minigrid-lavacrossing",
+    ]
+    repo_default = ["train:proc_mixed_loop", "test:proc_mixed_loop"]
+    if ood:
+        repo_default = ["train:proc_mixed_loop", "test:proc_mixed_ood_loop"]
+    repo_scenarios = repo_override or repo_default
+
+    specs = {
+        "core": SuiteSpec(
+            name="core",
+            cases=[
+                BenchCase(name="gridworld", env_type="gridworld"),
+                BenchCase(name="minigrid", env_type="minigrid", minigrid_scenarios=minigrid_scenarios),
+            ],
+            implemented=True,
+            description="GridWorld + MiniGrid baseline.",
+        ),
+        "tools": SuiteSpec(
+            name="tools",
+            cases=[
+                BenchCase(name="tools_basic", env_type="tools"),
+                BenchCase(name="repo_toolloop", env_type="repo", repo_scenarios=repo_scenarios),
+            ],
+            implemented=True,
+            description="ToolEnv + RepoToolEnv procedural loop.",
+        ),
+        "tools_open": SuiteSpec(
+            name="tools_open",
+            cases=[],
+            implemented=False,
+            description="Placeholder for open-action tool tasks.",
+        ),
+        "language": SuiteSpec(
+            name="language",
+            cases=[],
+            implemented=False,
+            description="Placeholder for language causality suites.",
+        ),
+        "social": SuiteSpec(
+            name="social",
+            cases=[],
+            implemented=False,
+            description="Placeholder for social/ToM suites.",
+        ),
+        "lifelong": SuiteSpec(
+            name="lifelong",
+            cases=[],
+            implemented=False,
+            description="Placeholder for continual learning suites.",
+        ),
+        "safety": SuiteSpec(
+            name="safety",
+            cases=[],
+            implemented=True,
+            description="Minimal safety sanity checks.",
+        ),
+    }
+    return specs
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a small benchmark battery across env families.")
-    parser.add_argument("--out", type=str, default=None, help="Output JSON path (default: bench_results/bench_<ts>.json).")
+    parser = argparse.ArgumentParser(description="Run AGI-Bench suites and emit a JSON report.")
+    parser.add_argument(
+        "--suite",
+        type=str,
+        default="agi_v1",
+        choices=["core", "tools", "tools_open", "language", "social", "lifelong", "safety", "agi_v1", "quick"],
+        help="Suite name to run.",
+    )
+    parser.add_argument(
+        "--report",
+        "--out",
+        dest="report",
+        type=str,
+        default=None,
+        help="Output JSON path (default: reports/bench_<suite>_<ts>.json).",
+    )
     parser.add_argument("--log-dir", type=str, default="bench_logs", help="Per-run JSONL logs directory.")
     parser.add_argument("--mode", type=str, default="stage4", choices=["stage4", "lifelong"], help="Experiment mode.")
     parser.add_argument(
         "--variants",
         type=str,
-        default="full,no_reflection,no_self",
+        default="full",
         help="Comma-separated agent variants to run.",
     )
-    parser.add_argument("--seeds", type=int, nargs="*", default=[0, 1], help="Seeds to run (default: 0 1).")
-    parser.add_argument(
-        "--only",
-        type=str,
-        default=None,
-        help="Comma-separated subset of cases to run (gridworld|instruction|social|minigrid|repo|mixed).",
-    )
-    parser.add_argument("--quick", action="store_true", help="Smaller/faster settings (good for smoke checks).")
+    parser.add_argument("--seeds", type=str, nargs="*", default=None, help="Seeds to run (CSV or space list).")
+    parser.add_argument("--quick", action="store_true", help="Smaller/faster settings for runnable suites.")
+    parser.add_argument("--ood", action="store_true", help="Use OOD splits where supported.")
+    mask_group = parser.add_mutually_exclusive_group()
+    mask_group.add_argument("--masked", "--masked-only", dest="masked_only", action="store_true", help="Report masked metrics only (tools).")
+    mask_group.add_argument("--unmasked", "--unmasked-only", dest="unmasked_only", action="store_true", help="Report unmasked metrics only (tools).")
     parser.add_argument("--use-skills", action="store_true", help="Enable hierarchical skills.")
     parser.add_argument(
         "--skill-mode",
@@ -98,74 +336,86 @@ def parse_args() -> argparse.Namespace:
         help="Skill backend (only used when --use-skills).",
     )
     parser.add_argument("--n-latent-skills", type=int, default=0, help="Number of latent skills.")
-
     # Optional scenario overrides
-    parser.add_argument("--minigrid-scenarios", type=str, default=None, help="Override default MiniGrid scenarios (CSV).")
-    parser.add_argument("--computer-scenarios", type=str, default=None, help="Override default Computer scenarios (CSV).")
-    parser.add_argument("--repo-scenarios", type=str, default=None, help="Override default Repo scenarios (CSV).")
+    parser.add_argument("--minigrid-scenarios", type=str, default=None, help="Override MiniGrid scenarios (CSV).")
+    parser.add_argument("--computer-scenarios", type=str, default=None, help="Override Computer scenarios (CSV).")
+    parser.add_argument("--repo-scenarios", type=str, default=None, help="Override Repo scenarios (CSV).")
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-    ts = int(time.time())
-    out_path = Path(args.out or (Path("bench_results") / f"bench_{ts}.json"))
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+def _run_suite(
+    suite: SuiteSpec,
+    *,
+    seeds: List[int],
+    variants: List[str],
+    mode: str,
+    quick: bool,
+    quick_stub: bool,
+    log_dir: str,
+    use_skills: bool,
+    skill_mode: str,
+    n_latent_skills: int,
+    masked_only: bool,
+    unmasked_only: bool,
+) -> Dict[str, Any]:
+    if suite.name == "safety":
+        metrics = _metric_template(suite.name)
+        metrics.update(_run_safety_smoke())
+        return {
+            "name": suite.name,
+            "status": "ok",
+            "score": None,
+            "metrics": metrics,
+            "per_env": [],
+            "notes": [],
+        }
 
-    variants = [v.strip() for v in str(args.variants).split(",") if v.strip()]
-    seeds = list(args.seeds or [])
-    only = set(_split_csv(args.only) or [])
+    if quick_stub or not suite.implemented:
+        metrics = _metric_template(suite.name)
+        status = "stub"
+        return {
+            "name": suite.name,
+            "status": status,
+            "score": None,
+            "metrics": metrics,
+            "per_env": [],
+            "notes": ["stubbed suite for Gate 0"],
+        }
 
-    override_minigrid = _split_csv(args.minigrid_scenarios)
-    override_computer = _split_csv(args.computer_scenarios)
-    override_repo = _split_csv(args.repo_scenarios)
-
-    cases: List[BenchCase] = []
-    for c in DEFAULT_CASES:
-        if only and c.name not in only:
-            continue
-        cases.append(
-            BenchCase(
-                name=c.name,
-                env_type=c.env_type,
-                minigrid_scenarios=override_minigrid if c.env_type in {"minigrid", "mixed"} and override_minigrid else c.minigrid_scenarios,
-                computer_scenarios=override_computer if c.env_type in {"computer", "mixed"} and override_computer else c.computer_scenarios,
-                repo_scenarios=override_repo if c.env_type in {"repo", "mixed"} and override_repo else c.repo_scenarios,
-            )
-        )
-
-    if not cases:
-        raise SystemExit("No benchmark cases selected.")
-
-    # Settings tuned for practicality: not a full research run, but stable enough to compare changes.
     episodes_per_phase = 50
     n_steps = 1024
     planning_horizon = 12
     planner_rollouts = 4
-    planning_coef = 0.3
+    planning_coef = 0.30
     lifelong_eps = 50
-    if args.quick:
-        episodes_per_phase = 15
-        n_steps = 256
-        planning_horizon = 8
+    stage1_steps = 5000
+    stage1_batches = 200
+    if quick:
+        episodes_per_phase = 8
+        n_steps = 128
+        planning_horizon = 6
         planner_rollouts = 2
         planning_coef = 0.25
-        lifelong_eps = 20
+        lifelong_eps = 10
+        stage1_steps = 200
+        stage1_batches = 10
 
-    results: List[Dict[str, Any]] = []
-    for case in cases:
+    run_records: List[Dict[str, Any]] = []
+    for case in suite.cases:
         for variant in variants:
             for seed in seeds:
-                run_id = f"bench_{case.name}_{variant}_seed{seed}_{args.mode}"
-                print(f"[BENCH] case={case.name} env={case.env_type} variant={variant} seed={seed}")
+                run_id = f"bench_{suite.name}_{case.name}_{variant}_seed{seed}"
+                print(f"[BENCH] suite={suite.name} case={case.name} env={case.env_type} variant={variant} seed={seed}")
                 res = run_experiment(
                     seed=int(seed),
-                    mode=str(args.mode),
+                    mode=str(mode),
                     agent_variant=str(variant),
                     env_type=str(case.env_type),
                     schedule_mode="iid",
                     episodes_per_phase=int(episodes_per_phase),
                     n_steps=int(n_steps),
+                    stage2_updates=1,
+                    stage4_updates=1,
                     planning_horizon=int(planning_horizon),
                     planner_mode="rollout",
                     planner_rollouts=int(planner_rollouts),
@@ -174,29 +424,212 @@ def main() -> int:
                     minigrid_scenarios=case.minigrid_scenarios,
                     computer_scenarios=case.computer_scenarios,
                     repo_scenarios=case.repo_scenarios,
-                    log_dir=str(args.log_dir),
+                    log_dir=str(log_dir),
                     run_id=run_id,
-                    use_skills=bool(args.use_skills),
-                    skill_mode=str(args.skill_mode),
-                    n_latent_skills=int(args.n_latent_skills),
+                    use_skills=bool(use_skills),
+                    skill_mode=str(skill_mode),
+                    n_latent_skills=int(n_latent_skills),
+                    stage1_steps=int(stage1_steps),
+                    stage1_batches=int(stage1_batches),
                 )
-                res = dict(res or {})
-                res["bench_case"] = case.name
-                results.append(res)
+                run_records.append(
+                    {
+                        "case": case,
+                        "variant": variant,
+                        "seed": seed,
+                        "result": res,
+                        "eval": _extract_eval_metrics(res or {}),
+                    }
+                )
 
-    payload = {
-        "timestamp": ts,
-        "mode": str(args.mode),
-        "quick": bool(args.quick),
-        "variants": variants,
-        "seeds": seeds,
-        "cases": [c.name for c in cases],
-        "results": results,
+    per_env: List[Dict[str, Any]] = []
+    for record in run_records:
+        case = record["case"]
+        eval_metrics = record.get("eval")
+        pass_masked, pass_unmasked, steps_unmasked = _extract_repo_metrics(eval_metrics)
+        mean_steps_unmasked = _safe_mean([float(x) for x in steps_unmasked])
+        pass_flag = None
+        if pass_unmasked is not None:
+            pass_flag = bool(float(pass_unmasked) >= 0.5)
+        elif pass_masked is not None:
+            pass_flag = bool(float(pass_masked) >= 0.5)
+        per_env.append(
+            {
+                "env": _case_label(case),
+                "seed": int(record["seed"]),
+                "variant": str(record["variant"]),
+                "pass": pass_flag,
+                "pass_rate_masked": pass_masked,
+                "pass_rate_unmasked": pass_unmasked,
+                "steps": mean_steps_unmasked,
+                "invalid_rate": None,
+            }
+        )
+
+    metrics = _metric_template(suite.name)
+    score = None
+    notes: List[str] = []
+    if suite.name == "tools":
+        masked_vals = []
+        unmasked_vals = []
+        steps_vals: List[int] = []
+        for record in run_records:
+            case = record["case"]
+            if case.env_type != "repo":
+                continue
+            eval_metrics = record.get("eval")
+            pass_masked, pass_unmasked, steps_unmasked = _extract_repo_metrics(eval_metrics)
+            if pass_masked is not None:
+                masked_vals.append(float(pass_masked))
+            if pass_unmasked is not None:
+                unmasked_vals.append(float(pass_unmasked))
+            steps_vals.extend([int(x) for x in steps_unmasked])
+        pass_rate_masked = _safe_mean(masked_vals)
+        pass_rate_unmasked = _safe_mean(unmasked_vals)
+        mean_steps_unmasked = _safe_mean([float(x) for x in steps_vals])
+        invalid_action_rate = None
+        if masked_only:
+            pass_rate_unmasked = None
+            mean_steps_unmasked = None
+            notes.append("masked_only: unmasked metrics suppressed")
+        if unmasked_only:
+            pass_rate_masked = None
+            notes.append("unmasked_only: masked metrics suppressed")
+        metrics.update(
+            {
+                "pass_rate_masked": pass_rate_masked,
+                "pass_rate_unmasked": pass_rate_unmasked,
+                "mean_steps_to_pass_unmasked": mean_steps_unmasked,
+                "invalid_action_rate": invalid_action_rate,
+                "mask_pred_f1": None,
+                "mask_pred_auc": None,
+                "bc_pretrain_used": False,
+                "action_mask_dropout_prob": None,
+                "mean_invalid_mass": None,
+                "ood_gap": None,
+            }
+        )
+        score = _tools_score(pass_rate_unmasked, invalid_action_rate, mean_steps_unmasked)
+    elif suite.name == "core":
+        mean_returns = []
+        test_returns = []
+        for record in run_records:
+            eval_metrics = record.get("eval") or {}
+            if "mean_return" in eval_metrics:
+                mean_returns.append(float(eval_metrics["mean_return"]))
+            if "test_mean_return" in eval_metrics:
+                test_returns.append(float(eval_metrics["test_mean_return"]))
+        metrics.update(
+            {
+                "mean_return": _safe_mean(mean_returns),
+                "test_mean_return": _safe_mean(test_returns),
+                "ood_gap": None,
+            }
+        )
+
+    return {
+        "name": suite.name,
+        "status": "ok",
+        "score": score,
+        "metrics": metrics,
+        "per_env": per_env,
+        "notes": notes,
     }
-    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
-    tmp_path.write_text(json.dumps(_sanitize(payload), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
-    tmp_path.replace(out_path)
-    print(f"[BENCH] Saved: {out_path}")
+
+
+def main() -> int:
+    args = parse_args()
+    ts = int(time.time())
+    report_path = Path(args.report or (Path("reports") / f"bench_{args.suite}_{ts}.json"))
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+
+    variants = [v.strip() for v in str(args.variants).split(",") if v.strip()]
+    seeds = _parse_seeds(args.seeds)
+    override_minigrid = _split_csv(args.minigrid_scenarios)
+    override_computer = _split_csv(args.computer_scenarios)
+    override_repo = _split_csv(args.repo_scenarios)
+
+    suite_specs = _build_suite_specs(
+        minigrid_override=override_minigrid,
+        computer_override=override_computer,
+        repo_override=override_repo,
+        ood=bool(args.ood),
+    )
+
+    if args.suite == "agi_v1":
+        selected = list(SUITE_ORDER)
+        quick_stub = False
+    elif args.suite == "quick":
+        selected = list(SUITE_ORDER)
+        quick_stub = True
+    else:
+        selected = [args.suite]
+        quick_stub = False
+
+    suites: List[Dict[str, Any]] = []
+    for name in selected:
+        spec = suite_specs.get(name)
+        if spec is None:
+            continue
+        suites.append(
+            _run_suite(
+                spec,
+                seeds=seeds,
+                variants=variants,
+                mode=args.mode,
+                quick=bool(args.quick),
+                quick_stub=quick_stub,
+                log_dir=str(args.log_dir),
+                use_skills=bool(args.use_skills),
+                skill_mode=str(args.skill_mode),
+                n_latent_skills=int(args.n_latent_skills),
+                masked_only=bool(args.masked_only),
+                unmasked_only=bool(args.unmasked_only),
+            )
+        )
+
+    scores_used = [s["score"] for s in suites if s.get("score") is not None and s.get("status") == "ok"]
+    agi_score = _geometric_mean([float(x) for x in scores_used if x is not None])
+    overall_notes: List[str] = []
+    if agi_score is None:
+        agi_score = 0.0
+        overall_notes.append("no_suite_scores_available")
+
+    report = {
+        "schema_version": SCHEMA_VERSION,
+        "meta": {
+            "timestamp": int(ts),
+            "git_commit": _git_commit(),
+            "seed_list": seeds,
+            "suite": str(args.suite),
+            "ood": bool(args.ood),
+            "quick": bool(args.quick) or bool(quick_stub),
+            "config": {
+                "mode": str(args.mode),
+                "variants": variants,
+                "use_skills": bool(args.use_skills),
+                "skill_mode": str(args.skill_mode),
+                "n_latent_skills": int(args.n_latent_skills),
+                "masked_only": bool(args.masked_only),
+                "unmasked_only": bool(args.unmasked_only),
+            },
+        },
+        "overall": {
+            "agi_score": agi_score,
+            "notes": overall_notes,
+            "gates": {
+                "gate0": "pass" if suites else "fail",
+                "gate1": "na",
+                "gate2": "na",
+            },
+        },
+        "suites": suites,
+    }
+
+    tmp_path = report_path.with_suffix(report_path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(_sanitize(report), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+    tmp_path.replace(report_path)
+    print(f"[BENCH] Saved: {report_path}")
     return 0
 
 
