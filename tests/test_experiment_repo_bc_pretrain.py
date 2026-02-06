@@ -24,6 +24,7 @@ def test_run_experiment_reports_repo_bc_pretrain_stats():
         run_self_reflection=False,
         run_stage3c=False,
         run_lifecycle=False,
+        deterministic_torch=True,
         repo_online_bc_coef=0.20,
         repo_bc_pretrain_episodes=2,
         repo_bc_pretrain_max_steps=16,

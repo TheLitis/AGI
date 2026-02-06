@@ -45,6 +45,7 @@ def main(
     resume_from: str = None,
     checkpoint_path: str = None,
     checkpoint_save_optim: bool = None,
+    deterministic_torch: bool = None,
     rl_steps: int = None,
     stage2_updates: int = None,
     stage4_updates: int = None,
@@ -245,6 +246,11 @@ def main(
             help="Also save/load optimizer state in checkpoints (larger files).",
         )
         parser.add_argument(
+            "--deterministic-torch",
+            action="store_true",
+            help="Enable deterministic PyTorch execution when possible (better reproducibility, potentially slower).",
+        )
+        parser.add_argument(
             "--minigrid-scenarios",
             type=str,
             default=None,
@@ -337,6 +343,7 @@ def main(
         resume_from = args.resume_from
         checkpoint_path = args.checkpoint_path
         checkpoint_save_optim = args.checkpoint_save_optim
+        deterministic_torch = args.deterministic_torch
         rl_steps = args.rl_steps
         stage2_updates = args.stage2_updates
         stage4_updates = args.stage4_updates
@@ -403,6 +410,8 @@ def main(
             checkpoint_path = None
         if checkpoint_save_optim is None:
             checkpoint_save_optim = False
+        if deterministic_torch is None:
+            deterministic_torch = False
         if rl_steps is None:
             rl_steps = 1024
         if stage2_updates is None:
@@ -444,6 +453,7 @@ def main(
         resume_from=resume_from,
         checkpoint_path=checkpoint_path,
         checkpoint_save_optim=checkpoint_save_optim,
+        deterministic_torch=bool(deterministic_torch),
         planning_horizon=planning_horizon,
         planner_mode=planner_mode,
         planner_rollouts=planner_rollouts,

@@ -9,6 +9,7 @@ Stages:
 """
 
 from typing import Any, Dict, List, Optional
+import os
 import random
 import numpy as np
 import torch
@@ -23,12 +24,25 @@ from skills import get_default_skills
 from checkpointing import load_checkpoint, save_checkpoint
 
 
-def _set_global_seeds(seed: int) -> None:
+def _set_global_seeds(seed: int, deterministic_torch: bool = False) -> None:
+    if deterministic_torch and torch.cuda.is_available():
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+    if deterministic_torch:
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        except Exception:
+            pass
+        if hasattr(torch.backends, "cudnn"):
+            try:
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = False
+            except Exception:
+                pass
 
 
 def _build_env_pool(
@@ -418,6 +432,7 @@ def run_experiment(
     resume_from: Optional[str] = None,
     checkpoint_path: Optional[str] = None,
     checkpoint_save_optim: bool = True,
+    deterministic_torch: bool = False,
 ) -> Dict[str, Any]:
     """
     Run the staged training pipeline and return metrics.
@@ -453,7 +468,7 @@ def run_experiment(
     Returns:
         Dict with "config" and "stage_metrics" plus metadata; all values are JSON-safe.
     """
-    _set_global_seeds(seed)
+    _set_global_seeds(seed, deterministic_torch=bool(deterministic_torch))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print(
@@ -1036,6 +1051,7 @@ def run_experiment(
             "skill_mode": skill_mode,
             "n_latent_skills": n_latent_skills,
             "train_latent_skills": bool(train_latent_flag),
+            "deterministic_torch": bool(deterministic_torch),
         },
     }
 
