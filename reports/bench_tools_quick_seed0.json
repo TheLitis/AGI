@@ -1,12 +1,12 @@
 {
   "schema_version": "0.1",
   "meta": {
-    "timestamp": 1770401301,
-    "git_commit": "a9c327b2d7738f61b8caf9add4c7c40dfc78a0d1",
+    "timestamp": 1770401446,
+    "git_commit": "b8ca98b2e4da6d63663e034e302b47f9e8dfc739",
     "seed_list": [
       0
     ],
-    "suite": "core",
+    "suite": "tools",
     "ood": false,
     "quick": true,
     "config": {
@@ -45,17 +45,24 @@
   },
   "suites": [
     {
-      "name": "core",
-      "status": "timeout",
+      "name": "tools",
+      "status": "running",
       "score": null,
       "metrics": {
-        "mean_return": 8.160007576147715,
-        "test_mean_return": 0.6846662759780884,
+        "pass_rate_masked": null,
+        "pass_rate_unmasked": null,
+        "mean_steps_to_pass_unmasked": null,
+        "invalid_action_rate": null,
+        "mask_pred_f1": null,
+        "mask_pred_auc": null,
+        "bc_pretrain_used": null,
+        "action_mask_dropout_prob": null,
+        "mean_invalid_mass": null,
         "ood_gap": null
       },
       "per_env": [
         {
-          "env": "gridworld/basic",
+          "env": "tool_env/basic",
           "seed": 0,
           "variant": "full",
           "status": "ok",
@@ -64,18 +71,6 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null
-        },
-        {
-          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
-          "seed": 0,
-          "variant": "full",
-          "status": "timeout",
-          "pass": false,
-          "pass_rate_masked": null,
-          "pass_rate_unmasked": null,
-          "steps": null,
-          "invalid_rate": null,
-          "timeout_episodes": 3
         }
       ],
       "notes": []
