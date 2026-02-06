@@ -34,6 +34,8 @@ def main(
     action_mask_internalization_coef: float = None,
     action_mask_dropout_prob: float = None,
     action_mask_prediction_coef: float = None,
+    repo_bc_pretrain_episodes: int = None,
+    repo_bc_pretrain_max_steps: int = None,
     computer_scenarios: str = None,
     repo_scenarios: str = None,
     skill_mode: str = None,
@@ -176,6 +178,18 @@ def main(
             ),
         )
         parser.add_argument(
+            "--repo-bc-episodes",
+            type=int,
+            default=0,
+            help="Episodes of expert behavior-cloning pretrain on RepoToolEnv before stage4 (0 disables).",
+        )
+        parser.add_argument(
+            "--repo-bc-max-steps",
+            type=int,
+            default=24,
+            help="Max steps per episode during RepoToolEnv BC pretrain.",
+        )
+        parser.add_argument(
             "--use-skills",
             action="store_true",
             help="Enable hierarchical skills and high-level policy.",
@@ -299,6 +313,8 @@ def main(
         action_mask_internalization_coef = args.invalid_action_coef
         action_mask_dropout_prob = args.action_mask_dropout
         action_mask_prediction_coef = args.action_mask_pred_coef
+        repo_bc_pretrain_episodes = args.repo_bc_episodes
+        repo_bc_pretrain_max_steps = args.repo_bc_max_steps
         agent_variant = args.agent_variant
         lifelong_episodes_per_chapter = args.lifelong_episodes_per_chapter
         use_skills = args.use_skills
@@ -346,6 +362,10 @@ def main(
             action_mask_dropout_prob = 0.0
         if action_mask_prediction_coef is None:
             action_mask_prediction_coef = 0.10
+        if repo_bc_pretrain_episodes is None:
+            repo_bc_pretrain_episodes = 0
+        if repo_bc_pretrain_max_steps is None:
+            repo_bc_pretrain_max_steps = 24
         if agent_variant is None:
             agent_variant = "full"
         if lifelong_episodes_per_chapter is None:
@@ -423,6 +443,8 @@ def main(
         action_mask_internalization_coef=float(action_mask_internalization_coef),
         action_mask_dropout_prob=float(action_mask_dropout_prob),
         action_mask_prediction_coef=float(action_mask_prediction_coef),
+        repo_bc_pretrain_episodes=int(repo_bc_pretrain_episodes),
+        repo_bc_pretrain_max_steps=int(repo_bc_pretrain_max_steps),
         log_dir=log_dir,
         run_id=run_id,
         lifelong_episodes_per_chapter=lifelong_episodes_per_chapter,

@@ -56,6 +56,8 @@ class RepoPatch:
     files: Optional[Dict[str, str]] = None  # relative path -> file content
     edits: Optional[List[RepoEdit]] = None
     description: str = ""
+    # Optional oracle hint used only for supervised demonstrations (BC pretrain).
+    is_solution: bool = False
 
 
 @dataclass
@@ -237,6 +239,7 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                     edits=[
                         RepoEdit(path="calc.py", find="return a - b", replace="return a + b", count=1),
                     ],
+                    is_solution=True,
                 ),
                 RepoPatch(
                     name="candidate_abs_diff",
@@ -272,6 +275,7 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                     name="candidate_true_div",
                     description="return a / b",
                     files={"calc.py": "def div(a, b):\n    return a / b\n"},
+                    is_solution=True,
                 ),
                 RepoPatch(
                     name="candidate_div_plus1",
@@ -300,6 +304,7 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                     edits=[
                         RepoEdit(path="calc.py", find="return a ^ b", replace="return a ** b", count=1),
                     ],
+                    is_solution=True,
                 ),
                 RepoPatch(
                     name="candidate_pow_builtin",
@@ -307,6 +312,7 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                     edits=[
                         RepoEdit(path="calc.py", find="return a ^ b", replace="return pow(a, b)", count=1),
                     ],
+                    is_solution=True,
                 ),
                 RepoPatch(
                     name="candidate_xor_nochange",
@@ -328,6 +334,7 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                     name="candidate_slice",
                     description="return s[::-1]",
                     files={"text.py": "def reverse(s):\n    return s[::-1]\n"},
+                    is_solution=True,
                 ),
                 RepoPatch(
                     name="candidate_identity",
@@ -352,6 +359,7 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                     name="candidate_sum",
                     description="return sum(xs)",
                     files={"list_utils.py": "def sum_list(xs):\n    return sum(xs)\n"},
+                    is_solution=True,
                 ),
             ],
         },
@@ -368,11 +376,13 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                     name="candidate_add_plus",
                     description="add.py: return a + b",
                     files={"add.py": "def add(a, b):\n    return a + b\n"},
+                    is_solution=True,
                 ),
                 RepoPatch(
                     name="candidate_div_true",
                     description="div.py: return a / b",
                     files={"div.py": "def div(a, b):\n    return a / b\n"},
+                    is_solution=True,
                 ),
             ],
         },
@@ -383,7 +393,12 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                 "test_calc.py": "from calc import mod\n\n\ndef test_mod_small():\n    assert mod(7, 3) == 1\n\n\ndef test_mod_equal():\n    assert mod(5, 5) == 0\n",
             },
             "patches": [
-                RepoPatch(name="candidate_mod", description="return a % b", files={"calc.py": "def mod(a, b):\n    return a % b\n"}),
+                RepoPatch(
+                    name="candidate_mod",
+                    description="return a % b",
+                    files={"calc.py": "def mod(a, b):\n    return a % b\n"},
+                    is_solution=True,
+                ),
                 RepoPatch(
                     name="candidate_sub",
                     description="return a - b",
@@ -402,6 +417,7 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                     name="candidate_minmax",
                     description="return max(lo, min(hi, x))",
                     files={"util.py": "def clamp(x, lo, hi):\n    return max(lo, min(hi, x))\n"},
+                    is_solution=True,
                 ),
                 RepoPatch(
                     name="candidate_maxmin_swapped",
@@ -421,6 +437,7 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                     name="candidate_filter_isdigit",
                     description="filter: not c.isdigit()",
                     files={"text.py": "def remove_digits(s):\n    return ''.join([c for c in s if not c.isdigit()])\n"},
+                    is_solution=True,
                 ),
                 RepoPatch(
                     name="candidate_keep_digits",
@@ -442,6 +459,7 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                     edits=[
                         RepoEdit(path="stats.py", find="return sum(xs)", replace="return sum(xs) / len(xs)", count=1),
                     ],
+                    is_solution=True,
                 ),
                 RepoPatch(
                     name="candidate_mean_intdiv",
@@ -473,6 +491,7 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                             count=1,
                         ),
                     ],
+                    is_solution=True,
                 ),
             ],
         },
@@ -501,7 +520,7 @@ def build_repo_taskset(scenario_names: Optional[List[str]] = None) -> List[RepoT
                     "test_main.py": "from main import answer\n\n\ndef test_answer():\n    assert answer() == 42\n",
                 },
                 "patches": [
-                    RepoPatch(name="fix_answer_42", files={"main.py": "def answer():\n    return 42\n"}),
+                    RepoPatch(name="fix_answer_42", files={"main.py": "def answer():\n    return 42\n"}, is_solution=True),
                     RepoPatch(name="wrong_answer_0", files={"main.py": "def answer():\n    return 0\n"}),
                 ],
             }
@@ -1007,14 +1026,16 @@ class RepoToolEnv(BaseEnv):
         patches: List[RepoPatch] = []
         ends_with_nl = bool(text.endswith("\n"))
         for i, expr in enumerate(cand_exprs):
+            expr_str = str(expr).strip()
             updated_lines = list(lines)
-            updated_lines[ret_idx] = f"{indent}return {expr}"
+            updated_lines[ret_idx] = f"{indent}return {expr_str}"
             updated = "\n".join(updated_lines) + ("\n" if ends_with_nl else "")
             patches.append(
                 RepoPatch(
                     name=f"auto_{fname}_{i}",
-                    description=f"{rel}: return {expr}",
+                    description=f"{rel}: return {expr_str}",
                     files={rel: updated},
+                    is_solution=(correct is not None and expr_str == str(correct).strip()),
                 )
             )
 
@@ -1183,6 +1204,7 @@ class RepoToolEnv(BaseEnv):
         candidate_exprs: List[str],
         call_args: List[str],
         expected_values: List[str],
+        solution_exprs: Optional[List[str]] = None,
     ) -> Tuple[Dict[str, str], List[RepoPatch]]:
         code = f"def {func_name}({args_sig}):\n    return {bug_expr}\n"
         test_lines: List[str] = [f"from {module} import {func_name}", "", "", f"def test_{func_name}_cases():"]
@@ -1192,13 +1214,16 @@ class RepoToolEnv(BaseEnv):
         tests = "\n".join(test_lines)
 
         find = f"return {bug_expr}"
+        solution_set = {str(x).strip() for x in (solution_exprs or []) if str(x).strip()}
         patches: List[RepoPatch] = []
         for i, expr in enumerate(candidate_exprs):
+            expr_str = str(expr).strip()
             patches.append(
                 RepoPatch(
                     name=f"cand_{i}",
-                    description=f"{func_name}: return {expr}",
-                    edits=[RepoEdit(path=module_file, find=find, replace=f"return {expr}", count=1)],
+                    description=f"{func_name}: return {expr_str}",
+                    edits=[RepoEdit(path=module_file, find=find, replace=f"return {expr_str}", count=1)],
+                    is_solution=expr_str in solution_set,
                 )
             )
 
@@ -1262,6 +1287,7 @@ class RepoToolEnv(BaseEnv):
             candidate_exprs=cand_list,
             call_args=call_args,
             expected_values=expected,
+            solution_exprs=[correct],
         )
 
     def _proc_pick_candidates(
@@ -1351,6 +1377,7 @@ class RepoToolEnv(BaseEnv):
             candidate_exprs=cand_add,
             call_args=call_args_add,
             expected_values=expected_add,
+            solution_exprs=[correct_add],
         )
 
         # div.py
@@ -1393,6 +1420,7 @@ class RepoToolEnv(BaseEnv):
             candidate_exprs=cand_div,
             call_args=call_args_div,
             expected_values=expected_div,
+            solution_exprs=[correct_div],
         )
 
         initial_files = dict(files_add)
@@ -1483,6 +1511,7 @@ class RepoToolEnv(BaseEnv):
                 name=f"plus_{i}",
                 description=f"plus: return {expr}",
                 edits=[RepoEdit(path="math_ops.py", find=find_plus, replace=f"return {expr}", count=1)],
+                is_solution=str(expr).strip() == str(correct_plus).strip(),
             )
             for i, expr in enumerate(cand_plus)
         ]
@@ -1500,6 +1529,7 @@ class RepoToolEnv(BaseEnv):
                 name=f"add_{i}",
                 description=f"add: return {expr}",
                 edits=[RepoEdit(path="api.py", find=find_add, replace=f"return {expr}", count=1)],
+                is_solution=str(expr).strip() == str(correct_add).strip(),
             )
             for i, expr in enumerate(cand_add)
         ]
@@ -1563,6 +1593,7 @@ class RepoToolEnv(BaseEnv):
             candidate_exprs=cand_list,
             call_args=call_args,
             expected_values=expected,
+            solution_exprs=[correct],
         )
 
     def _proc_task_add(
@@ -1611,6 +1642,7 @@ class RepoToolEnv(BaseEnv):
             candidate_exprs=cand_list,
             call_args=call_args,
             expected_values=expected,
+            solution_exprs=[correct],
         )
 
     def _proc_task_div(
@@ -1659,6 +1691,7 @@ class RepoToolEnv(BaseEnv):
             candidate_exprs=cand_list,
             call_args=call_args,
             expected_values=expected,
+            solution_exprs=[correct],
         )
 
     def _proc_task_power(
@@ -1705,6 +1738,7 @@ class RepoToolEnv(BaseEnv):
             candidate_exprs=cand_list,
             call_args=call_args,
             expected_values=expected,
+            solution_exprs=[correct],
         )
 
     def _proc_task_mean(
@@ -1757,6 +1791,7 @@ class RepoToolEnv(BaseEnv):
             candidate_exprs=cand_list,
             call_args=call_args,
             expected_values=expected,
+            solution_exprs=[correct],
         )
 
     def _run_pytest(self) -> Tuple[bool, int, int, str, bool]:
@@ -2004,6 +2039,69 @@ class RepoToolEnv(BaseEnv):
         if not np.any(mask):
             return np.ones((self.n_actions,), dtype=np.float32)
         return mask
+
+    def _patch_is_solution(self, patch_idx: int) -> bool:
+        if self.current_task is None:
+            return False
+        patches = list(self.current_task.patches or [])
+        idx = int(patch_idx)
+        if idx < 0 or idx >= len(patches):
+            return False
+        return bool(getattr(patches[idx], "is_solution", False))
+
+    def get_expert_action(self) -> int:
+        """
+        Oracle-like scripted policy for demonstrations:
+        run tests -> find/show a solving patch -> apply -> run tests.
+        """
+        # Keep action within discrete interface even if called unexpectedly early.
+        if self.current_task is None:
+            return 0
+
+        has_candidates = bool(self.current_task.patches)
+        if self.last_test_passed is True:
+            action = 0
+        elif self.last_test_passed is None or not has_candidates:
+            action = 3  # RUN_TESTS to bootstrap failure signal/candidates
+        elif self.workspace_dirty:
+            action = 3  # RUN_TESTS to validate current workspace
+        else:
+            # Idle with visible candidates: prefer a visible solving patch that
+            # we have not already applied in this slot; otherwise cycle.
+            idx0 = int(self.action_patch_indices[0]) if self.action_patch_indices else 0
+            idx1 = int(self.action_patch_indices[1]) if len(self.action_patch_indices) > 1 else 1
+
+            slot0_solve = self._patch_is_solution(idx0)
+            slot1_solve = self._patch_is_solution(idx1)
+
+            slot0_new = self.last_applied_patch_idx[0] is None or int(self.last_applied_patch_idx[0]) != idx0
+            slot1_new = self.last_applied_patch_idx[1] is None or int(self.last_applied_patch_idx[1]) != idx1
+
+            if slot0_solve and slot0_new:
+                action = 1
+            elif slot1_solve and slot1_new:
+                action = 2
+            elif slot0_solve and slot1_solve:
+                # Both visible solves were already attempted in current slot pairing.
+                action = 5 if self.n_actions > 5 else 1
+            elif slot0_solve:
+                action = 1
+            elif slot1_solve:
+                action = 2
+            else:
+                action = 5 if self.n_actions > 5 else 1
+
+        # Keep oracle compliant with active action mask when it is enabled.
+        try:
+            mask = self.get_action_mask()
+            if isinstance(mask, np.ndarray) and mask.shape[0] == self.n_actions:
+                if float(mask[int(action)]) <= 0.0:
+                    valid = np.where(mask > 0.0)[0]
+                    if valid.size > 0:
+                        action = int(valid[0])
+        except Exception:
+            pass
+        return int(action)
 
     def get_env_descriptor(self) -> np.ndarray:
         return np.array(self._env_descriptor, copy=True)

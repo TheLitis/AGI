@@ -508,6 +508,32 @@ class Trainer:
         probs = torch.sigmoid(mask_logits).clamp(min=min_prob, max=1.0)
         return logits + torch.log(probs)
 
+    def _get_active_env_instance(self) -> Any:
+        """
+        Return currently active concrete env (unwrap EnvPool when possible).
+        """
+        env_obj = self.env
+        envs_list = getattr(env_obj, "envs", None)
+        active_idx = getattr(env_obj, "active_env_idx", None)
+        if envs_list is not None and active_idx is not None:
+            try:
+                idx = int(active_idx)
+                if 0 <= idx < len(envs_list):
+                    return envs_list[idx]
+            except Exception:
+                pass
+        return env_obj
+
+    def _get_repo_expert_action(self) -> Optional[int]:
+        env_inst = self._get_active_env_instance()
+        expert_fn = getattr(env_inst, "get_expert_action", None)
+        if not callable(expert_fn):
+            return None
+        try:
+            return int(expert_fn())
+        except Exception:
+            return None
+
     def _compute_env_max_steps_by_id(self) -> torch.Tensor:
         """
         Build a stable per-env-id max_steps table (float32 tensor on self.device).
@@ -3963,6 +3989,180 @@ class Trainer:
             "mask_pred_loss": float(mask_pred_loss.detach().item()),
             "mask_pred_f1": float(mask_pred_f1) if mask_pred_f1 is not None else float("nan"),
             "mask_pred_auc": float(mask_pred_auc) if mask_pred_auc is not None else float("nan"),
+        }
+
+    def train_repo_policy_bc(
+        self,
+        n_episodes: int = 64,
+        max_steps: int = 24,
+        planning_coef: float = 0.0,
+        regime_name: str = "repo_bc_pretrain",
+    ) -> Dict[str, Any]:
+        """
+        Behavior-cloning pretrain on RepoToolEnv via scripted expert actions.
+        """
+        episodes_req = int(max(0, n_episodes))
+        if episodes_req <= 0:
+            return {
+                "used": False,
+                "episodes_requested": 0.0,
+                "episodes_used": 0.0,
+                "steps": 0.0,
+                "success_rate": 0.0,
+                "mean_loss": 0.0,
+                "mean_action_loss": 0.0,
+                "mean_mask_pred_loss": 0.0,
+            }
+
+        self.current_regime_name = str(regime_name or "repo_bc_pretrain")
+        self.agent.perception.eval()
+        self.agent.world_model.eval()
+        self.agent.self_model.eval()
+        self.agent.workspace.train()
+        self.agent.policy.train()
+        self.agent.value_model.train()
+
+        opt = self.agent.optim_policy
+        planning_coef_eff = max(0.0, float(planning_coef))
+        mask_pred_coef = float(getattr(self, "action_mask_prediction_coef", 0.0) or 0.0)
+
+        episodes_used = 0
+        steps_total = 0
+        solved = 0
+        loss_sum = 0.0
+        action_loss_sum = 0.0
+        mask_loss_sum = 0.0
+
+        for _ in range(episodes_req):
+            obs = self.env.reset(split="train")
+            expert_action = self._get_repo_expert_action()
+            if expert_action is None:
+                continue
+
+            episodes_used += 1
+            patch_np = obs["patch"]
+            energy = float(obs["energy"])
+            scenario_id = int(obs.get("scenario_id", getattr(self.env, "current_scenario_id", 0)))
+            env_id = int(obs.get("env_id", getattr(self.env, "env_id", 0)))
+
+            h_w = torch.zeros(
+                1,
+                1,
+                self.agent.world_model.gru.hidden_size,
+                device=self.device,
+            )
+            max_steps_ep = int(max(1, max_steps))
+
+            for _step in range(max_steps_ep):
+                patch_t = torch.from_numpy(patch_np).long().unsqueeze(0).to(self.device)
+                H_t = torch.tensor([[energy]], dtype=torch.float32, device=self.device)
+                scenario_t = torch.tensor([scenario_id], dtype=torch.long, device=self.device)
+                env_t = torch.tensor([env_id], dtype=torch.long, device=self.device)
+                env_desc_t = self._env_desc_from_ids(env_t)
+                text_t = self._text_tokens_from_ids(env_t, scenario_t)
+
+                with torch.no_grad():
+                    z_obs = self.agent.perception(
+                        patch_t, H_t, scenario_t, env_desc_t, text_tokens=text_t
+                    )
+                W_t = h_w.squeeze(0)
+                traits = self._mixed_traits()
+                M = self.agent.memory
+                S_t = torch.zeros(1, self.agent.self_model.gru.hidden_size, device=self.device)
+                V_pi = self.agent.value_model(W_t, H_t, traits, M)
+                delta_self = torch.zeros(1, 1, device=self.device)
+                U_t = torch.zeros(1, 1, device=self.device)
+                G_t = self.agent.workspace(
+                    W_t,
+                    S_t,
+                    H_t,
+                    V_pi,
+                    delta_self,
+                    U_t,
+                    traits,
+                    M,
+                )
+
+                logits_raw, mask_logits_pred = self._policy_forward_with_mask(G_t)
+                if planning_coef_eff > 0.0:
+                    with torch.no_grad():
+                        planner_logits = self._get_planner_logits(
+                            z_obs=z_obs,
+                            H_t=H_t,
+                            h_w=h_w,
+                            traits=traits,
+                            M=M,
+                        )
+                    logits_raw = (1.0 - planning_coef_eff) * logits_raw + planning_coef_eff * planner_logits
+
+                expert_action = self._get_repo_expert_action()
+                if expert_action is None:
+                    break
+                target = torch.tensor([int(expert_action)], dtype=torch.long, device=self.device)
+                action_loss = F.cross_entropy(logits_raw, target)
+                mask_loss = torch.tensor(0.0, device=self.device, dtype=action_loss.dtype)
+                mask = self._get_action_mask_for_logits(logits_raw)
+                if (
+                    mask is not None
+                    and mask_logits_pred is not None
+                    and mask_pred_coef > 0.0
+                    and mask_logits_pred.numel() > 0
+                ):
+                    mask_targets = mask.to(mask_logits_pred.dtype)
+                    mask_loss = F.binary_cross_entropy_with_logits(mask_logits_pred, mask_targets)
+
+                loss = action_loss + mask_pred_coef * mask_loss
+
+                opt.zero_grad()
+                loss.backward()
+                params_to_clip = [p for group in opt.param_groups for p in group["params"]]
+                nn.utils.clip_grad_norm_(params_to_clip, 1.0)
+                opt.step()
+
+                loss_sum += float(loss.detach().item())
+                action_loss_sum += float(action_loss.detach().item())
+                mask_loss_sum += float(mask_loss.detach().item())
+                steps_total += 1
+
+                action_t = torch.tensor([int(expert_action)], dtype=torch.long, device=self.device)
+                with torch.no_grad():
+                    _, h_w_new, _, _ = self.agent.world_model.forward_step(z_obs, H_t, action_t, h_w)
+                h_w = h_w_new.detach()
+
+                next_obs, _reward, done, info = self.env.step(int(expert_action))
+                patch_np = next_obs["patch"]
+                energy = float(next_obs["energy"])
+                scenario_id = int(next_obs.get("scenario_id", getattr(self.env, "current_scenario_id", scenario_id)))
+                env_id = int(next_obs.get("env_id", env_id))
+
+                if done:
+                    solved_flag = bool(info.get("last_test_passed", False))
+                    if not solved_flag:
+                        env_inst = self._get_active_env_instance()
+                        solved_flag = bool(getattr(env_inst, "last_test_passed", False))
+                    if solved_flag:
+                        solved += 1
+                    break
+
+        used = episodes_used > 0
+        mean_loss = float(loss_sum / max(1, steps_total))
+        mean_action_loss = float(action_loss_sum / max(1, steps_total))
+        mean_mask_loss = float(mask_loss_sum / max(1, steps_total))
+        success_rate = float(solved) / float(max(1, episodes_used))
+
+        print(
+            f"[Repo-BC] episodes={episodes_used}/{episodes_req}, steps={steps_total}, "
+            f"success_rate={success_rate:.3f}, mean_loss={mean_loss:.4f}"
+        )
+        return {
+            "used": bool(used),
+            "episodes_requested": float(episodes_req),
+            "episodes_used": float(episodes_used),
+            "steps": float(steps_total),
+            "success_rate": float(success_rate),
+            "mean_loss": float(mean_loss),
+            "mean_action_loss": float(mean_action_loss),
+            "mean_mask_pred_loss": float(mean_mask_loss),
         }
 
     def train_policy_a2c(

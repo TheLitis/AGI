@@ -90,3 +90,32 @@ def test_repo_tool_env_sets_death_flag_on_timeout_failure(tmp_path):
     assert info["death_flag"] == 1.0
     assert info["alive"] == 0.0
     assert env.workdir is None
+
+
+def test_repo_tool_env_expert_action_can_solve_task(tmp_path):
+    tasks = build_repo_taskset(["calc_add"])
+    cfg = RepoToolEnvConfig(
+        sandbox_root=str(tmp_path / "repo_sandboxes"),
+        max_steps=20,
+        timeout_sec=10.0,
+        shuffle_patch_bindings=True,
+        cleanup_on_done=True,
+        cleanup_on_reset=True,
+        keep_failed_sandboxes=False,
+    )
+    env = RepoToolEnv(task_set=tasks, config=cfg, env_id=0, env_name="repo_expert", seed=7)
+
+    env.reset(scenario_id=0)
+    assert env.current_task is not None
+    assert any(bool(getattr(p, "is_solution", False)) for p in env.current_task.patches)
+
+    done = False
+    info = {}
+    for _ in range(int(cfg.max_steps)):
+        action = env.get_expert_action()
+        _, _, done, info = env.step(action)
+        if done:
+            break
+
+    assert done is True
+    assert bool(info.get("last_test_passed", False)) is True

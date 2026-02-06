@@ -492,6 +492,9 @@ def _run_suite(
                 error_msg = None
                 res: Dict[str, Any] = {}
                 try:
+                    repo_bc_episodes = 0
+                    if str(case.env_type) == "repo":
+                        repo_bc_episodes = 16 if quick else 96
                     res = run_experiment(
                         seed=int(seed),
                         mode=str(mode),
@@ -528,6 +531,8 @@ def _run_suite(
                         run_self_reflection=bool(run_self_reflection),
                         run_stage3c=bool(run_stage3c),
                         run_lifecycle=bool(run_lifecycle),
+                        repo_bc_pretrain_episodes=int(repo_bc_episodes),
+                        repo_bc_pretrain_max_steps=int(eval_max_steps),
                     )
                 except Exception as exc:
                     status = "error"

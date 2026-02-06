@@ -394,6 +394,8 @@ def run_experiment(
     action_mask_internalization_coef: float = 0.10,
     action_mask_dropout_prob: float = 0.0,
     action_mask_prediction_coef: float = 0.10,
+    repo_bc_pretrain_episodes: int = 0,
+    repo_bc_pretrain_max_steps: int = 24,
     stage1_steps: int = 5000,
     stage1_batches: int = 200,
     eval_max_steps: int = 200,
@@ -460,7 +462,8 @@ def run_experiment(
         f"beta_conflict={beta_conflict:.3f}, beta_uncertainty={beta_uncertainty:.3f}, "
         f"invalid_action_coef={action_mask_internalization_coef:.3f}, "
         f"action_mask_dropout_prob={float(action_mask_dropout_prob):.3f}, "
-        f"action_mask_pred_coef={float(action_mask_prediction_coef):.3f}"
+        f"action_mask_pred_coef={float(action_mask_prediction_coef):.3f}, "
+        f"repo_bc_eps={int(max(0, repo_bc_pretrain_episodes))}"
     )
 
     env_choice = (env_type or "gridworld").lower()
@@ -814,6 +817,14 @@ def run_experiment(
     # Stage 4: policy with self + planner (optional)
     if mode in {"all", "stage4", "lifelong", "lifelong_train"}:
         planning_coef_eff = planning_coef if use_self_flag else 0.0
+        bc_eps = int(max(0, repo_bc_pretrain_episodes))
+        if env_choice == "repo" and bc_eps > 0:
+            stage_metrics["repo_bc_pretrain"] = trainer.train_repo_policy_bc(
+                n_episodes=bc_eps,
+                max_steps=int(max(1, repo_bc_pretrain_max_steps)),
+                planning_coef=0.0,
+                regime_name="repo_bc_pretrain",
+            )
 
         n_updates = int(max(1, stage4_updates))
         stage4_updates_stats: List[Dict[str, Any]] = []
@@ -993,6 +1004,8 @@ def run_experiment(
             "action_mask_internalization_coef": action_mask_internalization_coef,
             "action_mask_dropout_prob": float(action_mask_dropout_prob),
             "action_mask_prediction_coef": float(action_mask_prediction_coef),
+            "repo_bc_pretrain_episodes": int(max(0, repo_bc_pretrain_episodes)),
+            "repo_bc_pretrain_max_steps": int(max(1, repo_bc_pretrain_max_steps)),
             "eval_max_steps": int(eval_max_steps),
             "eval_episodes": int(eval_episodes),
             "lifecycle_eval_episodes": int(lifecycle_eval_episodes),
