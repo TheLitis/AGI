@@ -33,10 +33,8 @@
     }
   },
   "overall": {
-    "agi_score": 0.0,
-    "notes": [
-      "no_suite_scores_available"
-    ],
+    "agi_score": 0.3333333333333333,
+    "notes": [],
     "gates": {
       "gate0": "pass",
       "gate1": "na",
@@ -46,18 +44,18 @@
   "suites": [
     {
       "name": "tools",
-      "status": "running",
-      "score": null,
+      "status": "ok",
+      "score": 0.3333333333333333,
       "metrics": {
-        "pass_rate_masked": null,
-        "pass_rate_unmasked": null,
-        "mean_steps_to_pass_unmasked": null,
+        "pass_rate_masked": 1.0,
+        "pass_rate_unmasked": 0.3333333333333333,
+        "mean_steps_to_pass_unmasked": 6.0,
         "invalid_action_rate": null,
-        "mask_pred_f1": null,
-        "mask_pred_auc": null,
-        "bc_pretrain_used": null,
-        "action_mask_dropout_prob": null,
-        "mean_invalid_mass": null,
+        "mask_pred_f1": 0.42729306487695756,
+        "mask_pred_auc": 0.4772664603694966,
+        "bc_pretrain_used": true,
+        "action_mask_dropout_prob": 0.0,
+        "mean_invalid_mass": 0.3228089213371277,
         "ood_gap": null
       },
       "per_env": [
@@ -70,6 +68,17 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": false,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.3333333333333333,
+          "steps": 6.0,
           "invalid_rate": null
         }
       ],
