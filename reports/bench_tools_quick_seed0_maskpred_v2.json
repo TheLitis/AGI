@@ -1,8 +1,8 @@
 {
   "schema_version": "0.1",
   "meta": {
-    "timestamp": 1770406432,
-    "git_commit": "4403a1214d4cdae608ed741bd61f8dd5d05a0efd",
+    "timestamp": 1770406858,
+    "git_commit": "b05caba34924eea46a00dd20b67f73fd53e53deb",
     "seed_list": [
       0
     ],
@@ -34,7 +34,9 @@
   },
   "overall": {
     "agi_score": 0.0,
-    "notes": [],
+    "notes": [
+      "no_suite_scores_available"
+    ],
     "gates": {
       "gate0": "pass",
       "gate1": "na",
@@ -44,18 +46,18 @@
   "suites": [
     {
       "name": "tools",
-      "status": "ok",
-      "score": 0.0,
+      "status": "running",
+      "score": null,
       "metrics": {
-        "pass_rate_masked": 1.0,
-        "pass_rate_unmasked": 1.0,
-        "mean_steps_to_pass_unmasked": 7.333333333333333,
-        "invalid_action_rate": 0.4017353653907776,
-        "mask_pred_f1": 0.3647642679900745,
-        "mask_pred_auc": 0.28294240083256617,
-        "bc_pretrain_used": false,
-        "action_mask_dropout_prob": 0.0,
-        "mean_invalid_mass": 0.4017353653907776,
+        "pass_rate_masked": null,
+        "pass_rate_unmasked": null,
+        "mean_steps_to_pass_unmasked": null,
+        "invalid_action_rate": null,
+        "mask_pred_f1": null,
+        "mask_pred_auc": null,
+        "bc_pretrain_used": null,
+        "action_mask_dropout_prob": null,
+        "mean_invalid_mass": null,
         "ood_gap": null
       },
       "per_env": [
@@ -68,17 +70,6 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
-        },
-        {
-          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
-          "seed": 0,
-          "variant": "full",
-          "status": "ok",
-          "pass": true,
-          "pass_rate_masked": 1.0,
-          "pass_rate_unmasked": 1.0,
-          "steps": 7.333333333333333,
           "invalid_rate": null
         }
       ],

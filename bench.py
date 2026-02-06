@@ -610,6 +610,7 @@ def _run_suite(
         bc_pretrain_used = False
         action_mask_dropout_prob = None
         invalid_vals: List[float] = []
+        invalid_rate_vals: List[float] = []
         mask_f1_vals: List[float] = []
         mask_auc_vals: List[float] = []
         if run_records:
@@ -624,6 +625,9 @@ def _run_suite(
             if isinstance(stage_metrics, dict):
                 train_stats = stage_metrics.get("stage4_train_stats", {})
                 if isinstance(train_stats, dict):
+                    ir = train_stats.get("invalid_action_rate")
+                    if isinstance(ir, (int, float)) and math.isfinite(float(ir)):
+                        invalid_rate_vals.append(float(ir))
                     v = train_stats.get("mean_invalid_action_mass")
                     if isinstance(v, (int, float)) and math.isfinite(float(v)):
                         invalid_vals.append(float(v))
@@ -637,7 +641,8 @@ def _run_suite(
                     bc_pretrain_used = True
         if invalid_vals:
             mean_invalid_mass = _safe_mean(invalid_vals)
-            invalid_action_rate = mean_invalid_mass
+        if invalid_rate_vals:
+            invalid_action_rate = _safe_mean(invalid_rate_vals)
         if mask_f1_vals:
             mask_pred_f1 = _safe_mean(mask_f1_vals)
         if mask_auc_vals:
