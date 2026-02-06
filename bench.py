@@ -494,11 +494,9 @@ def _run_suite(
                 try:
                     repo_bc_episodes = 0
                     repo_online_bc_coef = 0.10
-                    eval_policy = "sample"
                     if str(case.env_type) == "repo":
                         repo_bc_episodes = 16 if quick else 96
                         repo_online_bc_coef = 0.20 if quick else 0.10
-                        eval_policy = "greedy"
                     res = run_experiment(
                         seed=int(seed),
                         mode=str(mode),
@@ -524,7 +522,6 @@ def _run_suite(
                         n_latent_skills=int(n_latent_skills),
                         stage1_steps=int(stage1_steps),
                         stage1_batches=int(stage1_batches),
-                        eval_policy=str(eval_policy),
                         eval_max_steps=int(eval_max_steps),
                         eval_episodes=int(eval_episodes),
                         lifecycle_eval_episodes=int(lifecycle_eval_episodes),
