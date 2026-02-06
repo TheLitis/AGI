@@ -46,11 +46,11 @@
   "suites": [
     {
       "name": "core",
-      "status": "running",
+      "status": "ok",
       "score": null,
       "metrics": {
-        "mean_return": null,
-        "test_mean_return": null,
+        "mean_return": 44.98315688967705,
+        "test_mean_return": 26.079359591007233,
         "ood_gap": null
       },
       "per_env": [
@@ -64,6 +64,18 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 1
         }
       ],
       "notes": []
