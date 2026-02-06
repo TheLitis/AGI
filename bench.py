@@ -533,7 +533,6 @@ def _run_suite(
                         run_self_reflection=bool(run_self_reflection),
                         run_stage3c=bool(run_stage3c),
                         run_lifecycle=bool(run_lifecycle),
-                        deterministic_torch=True,
                         repo_online_bc_coef=float(repo_online_bc_coef),
                         repo_bc_pretrain_episodes=int(repo_bc_episodes),
                         repo_bc_pretrain_max_steps=int(eval_max_steps),
