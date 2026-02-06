@@ -1,0 +1,84 @@
+{
+  "schema_version": "0.1",
+  "meta": {
+    "timestamp": 1770400673,
+    "git_commit": "1b9ca5338eb91f9513d18b6d8b1bd1da3c52f61a",
+    "seed_list": [
+      0,
+      1
+    ],
+    "suite": "agi_v1",
+    "ood": false,
+    "quick": true,
+    "config": {
+      "mode": "stage4",
+      "variants": [
+        "full"
+      ],
+      "use_skills": false,
+      "skill_mode": "handcrafted",
+      "n_latent_skills": 0,
+      "masked_only": false,
+      "unmasked_only": false,
+      "eval_max_steps": 200,
+      "eval_episodes": 3,
+      "lifecycle_eval_episodes": 2,
+      "lifecycle_online_episodes": 2,
+      "self_model_batches": 20,
+      "self_reflection_batches": 5,
+      "stage3c_batches": 5,
+      "stage3c_collect_episodes": 2,
+      "run_self_reflection": false,
+      "run_stage3c": false,
+      "run_lifecycle": false
+    }
+  },
+  "overall": {
+    "agi_score": 0.0,
+    "notes": [
+      "no_suite_scores_available"
+    ],
+    "gates": {
+      "gate0": "pass",
+      "gate1": "na",
+      "gate2": "na"
+    }
+  },
+  "suites": [
+    {
+      "name": "core",
+      "status": "running",
+      "score": null,
+      "metrics": {
+        "mean_return": null,
+        "test_mean_return": null,
+        "ood_gap": null
+      },
+      "per_env": [
+        {
+          "env": "gridworld/basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/basic",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        }
+      ],
+      "notes": []
+    }
+  ]
+}
