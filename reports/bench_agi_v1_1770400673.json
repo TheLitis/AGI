@@ -47,11 +47,11 @@
   "suites": [
     {
       "name": "core",
-      "status": "running",
+      "status": "timeout",
       "score": null,
       "metrics": {
-        "mean_return": null,
-        "test_mean_return": null,
+        "mean_return": 8.794452895720799,
+        "test_mean_return": 0.6846662759780884,
         "ood_gap": null
       },
       "per_env": [
@@ -75,6 +75,83 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 0,
+          "variant": "full",
+          "status": "timeout",
+          "pass": false,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 3
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 1,
+          "variant": "full",
+          "status": "timeout",
+          "pass": false,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 3
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "tools",
+      "status": "running",
+      "score": null,
+      "metrics": {
+        "pass_rate_masked": null,
+        "pass_rate_unmasked": null,
+        "mean_steps_to_pass_unmasked": null,
+        "invalid_action_rate": null,
+        "mask_pred_f1": null,
+        "mask_pred_auc": null,
+        "bc_pretrain_used": null,
+        "action_mask_dropout_prob": null,
+        "mean_invalid_mass": null,
+        "ood_gap": null
+      },
+      "per_env": [
+        {
+          "env": "tool_env/basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "tool_env/basic",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": false,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.3333333333333333,
+          "steps": 17.0,
           "invalid_rate": null
         }
       ],
