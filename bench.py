@@ -538,7 +538,7 @@ def _run_suite(
                 timeout_eps = 0
                 if isinstance(eval_metrics, dict):
                     timeout_eps = int(eval_metrics.get("timeout_episodes", 0) or 0)
-                if timeout_eps > 0 and status == "ok":
+                if timeout_eps >= int(eval_episodes) and status == "ok":
                     status = "timeout"
                     any_timeout = True
 
