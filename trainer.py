@@ -197,6 +197,7 @@ class Trainer:
         action_mask_internalization_coef: float = 0.10,
         action_mask_dropout_prob: float = 0.0,
         action_mask_prediction_coef: float = 0.10,
+        repo_online_bc_coef: float = 0.10,
         train_env_ids: Optional[list] = None,
         test_env_ids: Optional[list] = None,
         env_descriptors: Optional[torch.Tensor] = None,
@@ -297,6 +298,7 @@ class Trainer:
         except Exception:
             self.action_mask_dropout_prob = 0.0
         self.action_mask_prediction_coef = max(0.0, float(action_mask_prediction_coef or 0.0))
+        self.repo_online_bc_coef = max(0.0, float(repo_online_bc_coef or 0.0))
         self._trait_safety_ctx: Dict[str, Dict[str, Any]] = {}
 
         descriptors = None
@@ -3350,6 +3352,9 @@ class Trainer:
         invalid_action_mass_list: List[torch.Tensor] = []
         mask_pred_logits_list: List[torch.Tensor] = []
         mask_targets_list: List[torch.Tensor] = []
+        online_bc_logits_list: List[torch.Tensor] = []
+        online_bc_targets_list: List[torch.Tensor] = []
+        online_bc_enabled = float(getattr(self, "repo_online_bc_coef", 0.0) or 0.0) > 0.0
 
         step_idx = 0
         planner_used_steps = 0
@@ -3474,6 +3479,7 @@ class Trainer:
                 traits,
                 M,
             )
+            logits_for_online_bc: Optional[torch.Tensor] = None
 
             if self.use_skills and self.agent.high_level_policy is not None and self._total_skill_count() > 0:
                 action, logprob, entropy, skill_state = self._select_action_with_skills(
@@ -3491,6 +3497,7 @@ class Trainer:
                 # fallback to primitive policy if skill selection failed
                 if action is None:
                     logits_raw, mask_logits_pred = self._policy_forward_with_mask(G_t)
+                    logits_for_online_bc = logits_raw
                     mask = self._get_action_mask_for_logits(logits_raw)
                     has_invalid = bool(mask is not None and bool(torch.any(~mask).item()))
                     if mask is not None and mask_logits_pred is not None:
@@ -3537,6 +3544,7 @@ class Trainer:
                         )
                     planner_used_steps += 1
                     logits_raw = (1.0 - planning_coef) * logits_raw + planning_coef * planner_logits
+                logits_for_online_bc = logits_raw
 
                 mask = self._get_action_mask_for_logits(logits_raw)
                 has_invalid = bool(mask is not None and bool(torch.any(~mask).item()))
@@ -3569,6 +3577,18 @@ class Trainer:
                 action = dist.sample()
                 logprob = dist.log_prob(action)
                 entropy = dist.entropy()
+
+            if online_bc_enabled and logits_for_online_bc is not None:
+                expert_action = self._get_repo_expert_action()
+                if (
+                    expert_action is not None
+                    and int(expert_action) >= 0
+                    and int(expert_action) < int(logits_for_online_bc.shape[-1])
+                ):
+                    online_bc_logits_list.append(logits_for_online_bc)
+                    online_bc_targets_list.append(
+                        torch.tensor([int(expert_action)], dtype=torch.long, device=self.device)
+                    )
 
             # world model step for curiosity
             _, h_w_new, z_hat, H_hat = self.agent.world_model.forward_step(
@@ -3693,6 +3713,12 @@ class Trainer:
         mask_targets_t: Optional[torch.Tensor] = (
             torch.cat(mask_targets_list, dim=0) if mask_targets_list else None
         )
+        online_bc_logits_t: Optional[torch.Tensor] = (
+            torch.cat(online_bc_logits_list, dim=0) if online_bc_logits_list else None
+        )
+        online_bc_targets_t: Optional[torch.Tensor] = (
+            torch.cat(online_bc_targets_list, dim=0) if online_bc_targets_list else None
+        )
 
         # logging/diagnostics (planner usage)
         self.last_planner_usage_steps = int(planner_used_steps)
@@ -3711,6 +3737,8 @@ class Trainer:
             invalid_action_mass_t,
             mask_pred_logits_t,
             mask_targets_t,
+            online_bc_logits_t,
+            online_bc_targets_t,
         )
 
     # =========================
@@ -3877,6 +3905,8 @@ class Trainer:
         invalid_action_mass: Optional[torch.Tensor] = None,
         mask_pred_logits: Optional[torch.Tensor] = None,
         mask_targets: Optional[torch.Tensor] = None,
+        online_bc_logits: Optional[torch.Tensor] = None,
+        online_bc_targets: Optional[torch.Tensor] = None,
         regularization_coef: float = 0.0,
         optimizer: Optional[torch.optim.Optimizer] = None,
     ) -> Dict[str, float]:
@@ -3963,6 +3993,20 @@ class Trainer:
                     mask_pred_auc = float(
                         (sum_pos - (n_pos * (n_pos + 1) / 2.0)) / float(max(1, n_pos * n_neg))
                     )
+        online_bc_coef = float(getattr(self, "repo_online_bc_coef", 0.0) or 0.0)
+        online_bc_loss = torch.tensor(0.0, device=self.device, dtype=loss.dtype)
+        online_bc_samples = 0.0
+        if (
+            online_bc_logits is not None
+            and online_bc_targets is not None
+            and online_bc_coef > 0.0
+            and online_bc_logits.numel() > 0
+            and online_bc_targets.numel() > 0
+        ):
+            targets_long = online_bc_targets.to(dtype=torch.long).view(-1)
+            online_bc_samples = float(targets_long.numel())
+            online_bc_loss = F.cross_entropy(online_bc_logits, targets_long)
+            loss = loss + online_bc_coef * online_bc_loss
         if regularization_coef > 0.0:
             loss = loss + self._fast_param_l2_penalty(regularization_coef)
 
@@ -3989,6 +4033,9 @@ class Trainer:
             "mask_pred_loss": float(mask_pred_loss.detach().item()),
             "mask_pred_f1": float(mask_pred_f1) if mask_pred_f1 is not None else float("nan"),
             "mask_pred_auc": float(mask_pred_auc) if mask_pred_auc is not None else float("nan"),
+            "online_bc_coef": float(online_bc_coef),
+            "online_bc_loss": float(online_bc_loss.detach().item()),
+            "online_bc_samples": float(online_bc_samples),
         }
 
     def train_repo_policy_bc(
@@ -4199,6 +4246,8 @@ class Trainer:
             invalid_action_mass,
             mask_pred_logits,
             mask_targets,
+            online_bc_logits,
+            online_bc_targets,
         ) = self.collect_onpolicy_experience(
             n_steps=n_steps,
             use_self=use_self,
@@ -4219,6 +4268,8 @@ class Trainer:
             invalid_action_mass=invalid_action_mass,
             mask_pred_logits=mask_pred_logits,
             mask_targets=mask_targets,
+            online_bc_logits=online_bc_logits,
+            online_bc_targets=online_bc_targets,
             gamma=gamma,
             entropy_coef=entropy_coef,
             beta_conflict=beta_conflict,
@@ -4246,6 +4297,8 @@ class Trainer:
         mean_invalid_mass = float(stats.get("mean_invalid_action_mass", 0.0))
         mask_pred_f1 = stats.get("mask_pred_f1", float("nan"))
         mask_pred_auc = stats.get("mask_pred_auc", float("nan"))
+        online_bc_loss = float(stats.get("online_bc_loss", 0.0))
+        online_bc_samples = float(stats.get("online_bc_samples", 0.0))
         print(
             f"[A2C] use_self={use_self} | "
             f"mean_conflict={mean_conflict:.4f}, mean_uncertainty={mean_uncertainty:.4f}, "
@@ -4254,7 +4307,8 @@ class Trainer:
             f"entropy_coef_eff={entropy_eff:.5f}, curiosity_beta_eff={cur_beta_eff:.5f}, "
             f"planning_coef_eff={planning_coef_eff:.5f}, planner_usage_frac={planner_usage_frac:.3f} | "
             f"beta_conflict={beta_conflict:.3f}, beta_uncertainty={beta_uncertainty:.3f}, "
-            f"mask_pred_f1={mask_pred_f1:.3f}, mask_pred_auc={mask_pred_auc:.3f}"
+            f"mask_pred_f1={mask_pred_f1:.3f}, mask_pred_auc={mask_pred_auc:.3f}, "
+            f"online_bc_loss={online_bc_loss:.4f}, online_bc_samples={online_bc_samples:.0f}"
         )
         return stats
 

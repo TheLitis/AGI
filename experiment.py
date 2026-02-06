@@ -394,6 +394,7 @@ def run_experiment(
     action_mask_internalization_coef: float = 0.10,
     action_mask_dropout_prob: float = 0.0,
     action_mask_prediction_coef: float = 0.10,
+    repo_online_bc_coef: float = 0.10,
     repo_bc_pretrain_episodes: int = 0,
     repo_bc_pretrain_max_steps: int = 24,
     stage1_steps: int = 5000,
@@ -463,6 +464,7 @@ def run_experiment(
         f"invalid_action_coef={action_mask_internalization_coef:.3f}, "
         f"action_mask_dropout_prob={float(action_mask_dropout_prob):.3f}, "
         f"action_mask_pred_coef={float(action_mask_prediction_coef):.3f}, "
+        f"repo_online_bc_coef={float(repo_online_bc_coef):.3f}, "
         f"repo_bc_eps={int(max(0, repo_bc_pretrain_episodes))}"
     )
 
@@ -566,6 +568,7 @@ def run_experiment(
         action_mask_internalization_coef=action_mask_internalization_coef,
         action_mask_dropout_prob=float(action_mask_dropout_prob),
         action_mask_prediction_coef=float(action_mask_prediction_coef),
+        repo_online_bc_coef=float(repo_online_bc_coef),
     )
 
     if resume_from:
@@ -1004,6 +1007,7 @@ def run_experiment(
             "action_mask_internalization_coef": action_mask_internalization_coef,
             "action_mask_dropout_prob": float(action_mask_dropout_prob),
             "action_mask_prediction_coef": float(action_mask_prediction_coef),
+            "repo_online_bc_coef": float(repo_online_bc_coef),
             "repo_bc_pretrain_episodes": int(max(0, repo_bc_pretrain_episodes)),
             "repo_bc_pretrain_max_steps": int(max(1, repo_bc_pretrain_max_steps)),
             "eval_max_steps": int(eval_max_steps),

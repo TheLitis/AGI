@@ -34,6 +34,7 @@ def main(
     action_mask_internalization_coef: float = None,
     action_mask_dropout_prob: float = None,
     action_mask_prediction_coef: float = None,
+    repo_online_bc_coef: float = None,
     repo_bc_pretrain_episodes: int = None,
     repo_bc_pretrain_max_steps: int = None,
     computer_scenarios: str = None,
@@ -178,6 +179,12 @@ def main(
             ),
         )
         parser.add_argument(
+            "--repo-online-bc-coef",
+            type=float,
+            default=0.10,
+            help="Auxiliary online BC loss weight on RepoToolEnv using expert actions during A2C rollouts.",
+        )
+        parser.add_argument(
             "--repo-bc-episodes",
             type=int,
             default=0,
@@ -313,6 +320,7 @@ def main(
         action_mask_internalization_coef = args.invalid_action_coef
         action_mask_dropout_prob = args.action_mask_dropout
         action_mask_prediction_coef = args.action_mask_pred_coef
+        repo_online_bc_coef = args.repo_online_bc_coef
         repo_bc_pretrain_episodes = args.repo_bc_episodes
         repo_bc_pretrain_max_steps = args.repo_bc_max_steps
         agent_variant = args.agent_variant
@@ -362,6 +370,8 @@ def main(
             action_mask_dropout_prob = 0.0
         if action_mask_prediction_coef is None:
             action_mask_prediction_coef = 0.10
+        if repo_online_bc_coef is None:
+            repo_online_bc_coef = 0.10
         if repo_bc_pretrain_episodes is None:
             repo_bc_pretrain_episodes = 0
         if repo_bc_pretrain_max_steps is None:
@@ -443,6 +453,7 @@ def main(
         action_mask_internalization_coef=float(action_mask_internalization_coef),
         action_mask_dropout_prob=float(action_mask_dropout_prob),
         action_mask_prediction_coef=float(action_mask_prediction_coef),
+        repo_online_bc_coef=float(repo_online_bc_coef),
         repo_bc_pretrain_episodes=int(repo_bc_pretrain_episodes),
         repo_bc_pretrain_max_steps=int(repo_bc_pretrain_max_steps),
         log_dir=log_dir,

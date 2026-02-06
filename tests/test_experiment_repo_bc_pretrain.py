@@ -24,6 +24,7 @@ def test_run_experiment_reports_repo_bc_pretrain_stats():
         run_self_reflection=False,
         run_stage3c=False,
         run_lifecycle=False,
+        repo_online_bc_coef=0.20,
         repo_bc_pretrain_episodes=2,
         repo_bc_pretrain_max_steps=16,
     )
@@ -33,3 +34,5 @@ def test_run_experiment_reports_repo_bc_pretrain_stats():
     stats = stage_metrics["repo_bc_pretrain"]
     assert bool(stats.get("used", False)) is True
     assert float(stats.get("episodes_used", 0.0)) >= 1.0
+    stage4_stats = stage_metrics.get("stage4_train_stats", {})
+    assert float(stage4_stats.get("online_bc_samples", 0.0)) > 0.0
