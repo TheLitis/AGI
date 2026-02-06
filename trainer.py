@@ -196,6 +196,7 @@ class Trainer:
         safety_penalty_coef: float = 1.0,
         action_mask_internalization_coef: float = 0.10,
         action_mask_dropout_prob: float = 0.0,
+        action_mask_prediction_coef: float = 0.10,
         train_env_ids: Optional[list] = None,
         test_env_ids: Optional[list] = None,
         env_descriptors: Optional[torch.Tensor] = None,
@@ -295,6 +296,7 @@ class Trainer:
             self.action_mask_dropout_prob = max(0.0, min(1.0, float(action_mask_dropout_prob)))
         except Exception:
             self.action_mask_dropout_prob = 0.0
+        self.action_mask_prediction_coef = max(0.0, float(action_mask_prediction_coef or 0.0))
         self._trait_safety_ctx: Dict[str, Dict[str, Any]] = {}
 
         descriptors = None
@@ -480,6 +482,31 @@ class Trainer:
         if mask is None:
             return logits
         return logits.masked_fill(~mask, -1.0e9)
+
+    def _policy_forward_with_mask(self, G_t: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+        Forward policy and (optionally) auxiliary mask head.
+        """
+        policy = self.agent.policy
+        if hasattr(policy, "forward_with_mask"):
+            logits, mask_logits = policy.forward_with_mask(G_t)
+            return logits, mask_logits
+        return policy(G_t), None
+
+    def _apply_predicted_mask_bias(
+        self,
+        logits: torch.Tensor,
+        mask_logits: Optional[torch.Tensor],
+        *,
+        min_prob: float = 1.0e-3,
+    ) -> torch.Tensor:
+        """
+        Softly bias logits by predicted validity probabilities.
+        """
+        if mask_logits is None:
+            return logits
+        probs = torch.sigmoid(mask_logits).clamp(min=min_prob, max=1.0)
+        return logits + torch.log(probs)
 
     def _compute_env_max_steps_by_id(self) -> torch.Tensor:
         """
@@ -3295,6 +3322,8 @@ class Trainer:
         conflicts_list: List[torch.Tensor] = []
         uncertainties_list: List[torch.Tensor] = []
         invalid_action_mass_list: List[torch.Tensor] = []
+        mask_pred_logits_list: List[torch.Tensor] = []
+        mask_targets_list: List[torch.Tensor] = []
 
         step_idx = 0
         planner_used_steps = 0
@@ -3435,9 +3464,13 @@ class Trainer:
                 )
                 # fallback to primitive policy if skill selection failed
                 if action is None:
-                    logits_raw = self.agent.policy(G_t)
+                    logits_raw, mask_logits_pred = self._policy_forward_with_mask(G_t)
                     mask = self._get_action_mask_for_logits(logits_raw)
-                    if mask is not None and torch.any(~mask):
+                    has_invalid = bool(mask is not None and bool(torch.any(~mask).item()))
+                    if mask is not None and mask_logits_pred is not None:
+                        mask_pred_logits_list.append(mask_logits_pred)
+                        mask_targets_list.append(mask.to(mask_logits_pred.dtype))
+                    if has_invalid:
                         probs = torch.softmax(logits_raw, dim=-1)
                         invalid_action_mass = (probs * (~mask).to(probs.dtype)).sum(dim=-1)
                     else:
@@ -3446,16 +3479,25 @@ class Trainer:
                         )
                     apply_mask = True
                     dropout_p = float(getattr(self, "action_mask_dropout_prob", 0.0) or 0.0)
-                    if dropout_p > 0.0 and mask is not None and torch.any(~mask):
+                    if dropout_p > 0.0 and has_invalid:
                         if torch.rand((), device=logits_raw.device).item() < dropout_p:
                             apply_mask = False
-                    logits = logits_raw.masked_fill(~mask, -1.0e9) if (apply_mask and mask is not None) else logits_raw
+                    if apply_mask and has_invalid:
+                        logits = logits_raw.masked_fill(~mask, -1.0e9)
+                    elif (
+                        mask is not None
+                        and mask_logits_pred is not None
+                        and float(getattr(self, "action_mask_prediction_coef", 0.0) or 0.0) > 0.0
+                    ):
+                        logits = self._apply_predicted_mask_bias(logits_raw, mask_logits_pred)
+                    else:
+                        logits = logits_raw
                     dist = Categorical(logits=logits)
                     action = dist.sample()
                     logprob = dist.log_prob(action)
                     entropy = dist.entropy()
             else:
-                logits_raw = self.agent.policy(G_t)  # (1, n_actions)
+                logits_raw, mask_logits_pred = self._policy_forward_with_mask(G_t)  # (1, n_actions)
 
                 # ---- planner (????????????? _get_planner_logits) ----
                 if planning_coef > 0.0:
@@ -3471,7 +3513,11 @@ class Trainer:
                     logits_raw = (1.0 - planning_coef) * logits_raw + planning_coef * planner_logits
 
                 mask = self._get_action_mask_for_logits(logits_raw)
-                if mask is not None and torch.any(~mask):
+                has_invalid = bool(mask is not None and bool(torch.any(~mask).item()))
+                if mask is not None and mask_logits_pred is not None:
+                    mask_pred_logits_list.append(mask_logits_pred)
+                    mask_targets_list.append(mask.to(mask_logits_pred.dtype))
+                if has_invalid:
                     probs = torch.softmax(logits_raw, dim=-1)
                     invalid_action_mass = (probs * (~mask).to(probs.dtype)).sum(dim=-1)
                 else:
@@ -3480,10 +3526,19 @@ class Trainer:
                     )
                 apply_mask = True
                 dropout_p = float(getattr(self, "action_mask_dropout_prob", 0.0) or 0.0)
-                if dropout_p > 0.0 and mask is not None and torch.any(~mask):
+                if dropout_p > 0.0 and has_invalid:
                     if torch.rand((), device=logits_raw.device).item() < dropout_p:
                         apply_mask = False
-                logits = logits_raw.masked_fill(~mask, -1.0e9) if (apply_mask and mask is not None) else logits_raw
+                if apply_mask and has_invalid:
+                    logits = logits_raw.masked_fill(~mask, -1.0e9)
+                elif (
+                    mask is not None
+                    and mask_logits_pred is not None
+                    and float(getattr(self, "action_mask_prediction_coef", 0.0) or 0.0) > 0.0
+                ):
+                    logits = self._apply_predicted_mask_bias(logits_raw, mask_logits_pred)
+                else:
+                    logits = logits_raw
                 dist = Categorical(logits=logits)
                 action = dist.sample()
                 logprob = dist.log_prob(action)
@@ -3606,6 +3661,12 @@ class Trainer:
         conflicts_t = torch.cat(conflicts_list, dim=0)
         uncertainties_t = torch.cat(uncertainties_list, dim=0)
         invalid_action_mass_t = torch.cat(invalid_action_mass_list, dim=0)
+        mask_pred_logits_t: Optional[torch.Tensor] = (
+            torch.cat(mask_pred_logits_list, dim=0) if mask_pred_logits_list else None
+        )
+        mask_targets_t: Optional[torch.Tensor] = (
+            torch.cat(mask_targets_list, dim=0) if mask_targets_list else None
+        )
 
         # logging/diagnostics (planner usage)
         self.last_planner_usage_steps = int(planner_used_steps)
@@ -3622,6 +3683,8 @@ class Trainer:
             conflicts_t,
             uncertainties_t,
             invalid_action_mass_t,
+            mask_pred_logits_t,
+            mask_targets_t,
         )
 
     # =========================
@@ -3786,6 +3849,8 @@ class Trainer:
         beta_conflict: float,
         beta_uncertainty: float,
         invalid_action_mass: Optional[torch.Tensor] = None,
+        mask_pred_logits: Optional[torch.Tensor] = None,
+        mask_targets: Optional[torch.Tensor] = None,
         regularization_coef: float = 0.0,
         optimizer: Optional[torch.optim.Optimizer] = None,
     ) -> Dict[str, float]:
@@ -3830,6 +3895,48 @@ class Trainer:
             #   KL(masked||raw) = -log(sum_a p_raw(a) * mask(a)) = -log(valid_mass)
             valid_mass = (1.0 - invalid_action_mass).clamp(min=1.0e-6, max=1.0)
             loss = loss + invalid_coef * (-torch.log(valid_mass)).mean()
+        mask_pred_coef = float(getattr(self, "action_mask_prediction_coef", 0.0) or 0.0)
+        mask_pred_loss = torch.tensor(0.0, device=self.device, dtype=loss.dtype)
+        mask_pred_f1: Optional[float] = None
+        mask_pred_auc: Optional[float] = None
+        if (
+            mask_pred_logits is not None
+            and mask_targets is not None
+            and mask_pred_coef > 0.0
+            and mask_pred_logits.numel() > 0
+            and mask_targets.numel() > 0
+        ):
+            targets = mask_targets.to(mask_pred_logits.dtype)
+            mask_pred_loss = F.binary_cross_entropy_with_logits(mask_pred_logits, targets)
+            loss = loss + mask_pred_coef * mask_pred_loss
+
+            with torch.no_grad():
+                probs = torch.sigmoid(mask_pred_logits)
+                preds = probs >= 0.5
+                trues = targets >= 0.5
+                tp = float((preds & trues).sum().item())
+                fp = float((preds & (~trues)).sum().item())
+                fn = float(((~preds) & trues).sum().item())
+                precision = tp / max(1.0, tp + fp)
+                recall = tp / max(1.0, tp + fn)
+                if precision + recall > 0.0:
+                    mask_pred_f1 = float((2.0 * precision * recall) / (precision + recall))
+                else:
+                    mask_pred_f1 = 0.0
+
+                scores_np = probs.detach().reshape(-1).cpu().numpy()
+                labels_np = trues.detach().reshape(-1).to(torch.int64).cpu().numpy()
+                n_pos = int(labels_np.sum())
+                n_total = int(labels_np.size)
+                n_neg = int(n_total - n_pos)
+                if n_pos > 0 and n_neg > 0:
+                    order = np.argsort(scores_np, kind="mergesort")
+                    ranks = np.empty_like(order)
+                    ranks[order] = np.arange(n_total) + 1
+                    sum_pos = float(ranks[labels_np == 1].sum())
+                    mask_pred_auc = float(
+                        (sum_pos - (n_pos * (n_pos + 1) / 2.0)) / float(max(1, n_pos * n_neg))
+                    )
         if regularization_coef > 0.0:
             loss = loss + self._fast_param_l2_penalty(regularization_coef)
 
@@ -3852,6 +3959,10 @@ class Trainer:
             if invalid_action_mass is not None
             else 0.0,
             "invalid_action_coef": float(invalid_coef),
+            "mask_pred_coef": float(mask_pred_coef),
+            "mask_pred_loss": float(mask_pred_loss.detach().item()),
+            "mask_pred_f1": float(mask_pred_f1) if mask_pred_f1 is not None else float("nan"),
+            "mask_pred_auc": float(mask_pred_auc) if mask_pred_auc is not None else float("nan"),
         }
 
     def train_policy_a2c(
@@ -3886,6 +3997,8 @@ class Trainer:
             conflicts,
             uncertainties,
             invalid_action_mass,
+            mask_pred_logits,
+            mask_targets,
         ) = self.collect_onpolicy_experience(
             n_steps=n_steps,
             use_self=use_self,
@@ -3904,6 +4017,8 @@ class Trainer:
             conflicts=conflicts,
             uncertainties=uncertainties,
             invalid_action_mass=invalid_action_mass,
+            mask_pred_logits=mask_pred_logits,
+            mask_targets=mask_targets,
             gamma=gamma,
             entropy_coef=entropy_coef,
             beta_conflict=beta_conflict,
@@ -3929,6 +4044,8 @@ class Trainer:
         planner_usage_frac = float(getattr(self, "last_planner_usage_frac", 0.0))
         entropy_eff = stats.get("entropy_coef_eff", entropy_coef)
         mean_invalid_mass = float(stats.get("mean_invalid_action_mass", 0.0))
+        mask_pred_f1 = stats.get("mask_pred_f1", float("nan"))
+        mask_pred_auc = stats.get("mask_pred_auc", float("nan"))
         print(
             f"[A2C] use_self={use_self} | "
             f"mean_conflict={mean_conflict:.4f}, mean_uncertainty={mean_uncertainty:.4f}, "
@@ -3936,8 +4053,10 @@ class Trainer:
             f"meta_conflict_ma={meta_conflict_ma:.4f}, meta_uncertainty_ma={meta_uncertainty_ma:.4f} | "
             f"entropy_coef_eff={entropy_eff:.5f}, curiosity_beta_eff={cur_beta_eff:.5f}, "
             f"planning_coef_eff={planning_coef_eff:.5f}, planner_usage_frac={planner_usage_frac:.3f} | "
-            f"beta_conflict={beta_conflict:.3f}, beta_uncertainty={beta_uncertainty:.3f}"
+            f"beta_conflict={beta_conflict:.3f}, beta_uncertainty={beta_uncertainty:.3f}, "
+            f"mask_pred_f1={mask_pred_f1:.3f}, mask_pred_auc={mask_pred_auc:.3f}"
         )
+        return stats
 
     # =========================
     #  Stage 3: SelfModel offline
@@ -4902,12 +5021,24 @@ class Trainer:
                                 W_t=W_t,
                             )
                             if action is None:
-                                logits = self.agent.policy(G_t)
-                                logits = self._apply_action_mask(logits)
+                                logits_raw, mask_logits_pred = self._policy_forward_with_mask(G_t)
+                                mask = self._get_action_mask_for_logits(logits_raw)
+                                has_invalid = bool(mask is not None and bool(torch.any(~mask).item()))
+                                if has_invalid:
+                                    logits = logits_raw.masked_fill(~mask, -1.0e9)
+                                elif (
+                                    mask is not None
+                                    and mask_logits_pred is not None
+                                    and float(getattr(self, "action_mask_prediction_coef", 0.0) or 0.0) > 0.0
+                                ):
+                                    logits = self._apply_predicted_mask_bias(logits_raw, mask_logits_pred)
+                                else:
+                                    logits = logits_raw
                                 dist = Categorical(logits=logits)
                                 action = dist.sample()
                         else:
-                            logits = self.agent.policy(G_t)
+                            logits_raw, mask_logits_pred = self._policy_forward_with_mask(G_t)
+                            logits = logits_raw
 
                             if planning_coef > 0.0:
                                 planner_logits = self._get_planner_logits(
@@ -4919,7 +5050,16 @@ class Trainer:
                                 )
                                 logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
 
-                            logits = self._apply_action_mask(logits)
+                            mask = self._get_action_mask_for_logits(logits)
+                            has_invalid = bool(mask is not None and bool(torch.any(~mask).item()))
+                            if has_invalid:
+                                logits = logits.masked_fill(~mask, -1.0e9)
+                            elif (
+                                mask is not None
+                                and mask_logits_pred is not None
+                                and float(getattr(self, "action_mask_prediction_coef", 0.0) or 0.0) > 0.0
+                            ):
+                                logits = self._apply_predicted_mask_bias(logits, mask_logits_pred)
                             if eval_policy_norm == "greedy":
                                 action = torch.argmax(logits, dim=-1)
                             else:

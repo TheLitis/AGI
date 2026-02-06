@@ -393,6 +393,7 @@ def run_experiment(
     planning_coef: float = 0.3,
     action_mask_internalization_coef: float = 0.10,
     action_mask_dropout_prob: float = 0.0,
+    action_mask_prediction_coef: float = 0.10,
     stage1_steps: int = 5000,
     stage1_batches: int = 200,
     eval_max_steps: int = 200,
@@ -458,7 +459,8 @@ def run_experiment(
         f"planning_coef={planning_coef:.3f}, "
         f"beta_conflict={beta_conflict:.3f}, beta_uncertainty={beta_uncertainty:.3f}, "
         f"invalid_action_coef={action_mask_internalization_coef:.3f}, "
-        f"action_mask_dropout_prob={float(action_mask_dropout_prob):.3f}"
+        f"action_mask_dropout_prob={float(action_mask_dropout_prob):.3f}, "
+        f"action_mask_pred_coef={float(action_mask_prediction_coef):.3f}"
     )
 
     env_choice = (env_type or "gridworld").lower()
@@ -560,6 +562,7 @@ def run_experiment(
         n_latent_skills=n_latent_skills,
         action_mask_internalization_coef=action_mask_internalization_coef,
         action_mask_dropout_prob=float(action_mask_dropout_prob),
+        action_mask_prediction_coef=float(action_mask_prediction_coef),
     )
 
     if resume_from:
@@ -578,6 +581,27 @@ def run_experiment(
     stage_metrics: Dict[str, Any] = {}
     stage_metrics["trait_reflection_debug"] = trainer.trait_reflection_debug
     use_self_flag = agent_variant != "no_self"
+
+    def _mean_numeric_dict(rows: List[Dict[str, Any]]) -> Dict[str, float]:
+        if not rows:
+            return {}
+        keys = set()
+        for r in rows:
+            if isinstance(r, dict):
+                keys.update(r.keys())
+        out: Dict[str, float] = {}
+        for k in sorted(keys):
+            vals: List[float] = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                v = r.get(k)
+                if isinstance(v, (int, float)) and np.isfinite(float(v)):
+                    vals.append(float(v))
+            if vals:
+                out[k] = float(np.mean(vals))
+        return out
+
     def _attach_trait_logs(limit: int = 200) -> None:
         summary = trainer.get_trait_reflection_summary()
         if summary:
@@ -619,8 +643,9 @@ def run_experiment(
     # Stage 2: policy without self
     if mode in {"all", "stage2", "stage3", "stage3b", "stage3c", "stage4", "lifelong", "lifelong_train"}:
         n_updates = int(max(1, stage2_updates))
+        stage2_updates_stats: List[Dict[str, Any]] = []
         for _ in range(n_updates):
-            trainer.train_policy_a2c(
+            upd = trainer.train_policy_a2c(
                 n_steps=n_steps,
                 gamma=gamma,
                 entropy_coef=entropy_coef,
@@ -631,6 +656,10 @@ def run_experiment(
                 planning_coef=0.0,
                 regime_name="stage2",
             )
+            if isinstance(upd, dict):
+                stage2_updates_stats.append(upd)
+        if stage2_updates_stats:
+            stage_metrics["stage2_train_stats"] = _mean_numeric_dict(stage2_updates_stats)
         stage_metrics["eval_after_stage2"] = trainer.evaluate(
             n_episodes=int(eval_episodes),
             max_steps=int(eval_max_steps),
@@ -787,8 +816,9 @@ def run_experiment(
         planning_coef_eff = planning_coef if use_self_flag else 0.0
 
         n_updates = int(max(1, stage4_updates))
+        stage4_updates_stats: List[Dict[str, Any]] = []
         for _ in range(n_updates):
-            trainer.train_policy_a2c(
+            upd = trainer.train_policy_a2c(
                 n_steps=n_steps,
                 gamma=gamma,
                 entropy_coef=entropy_coef,
@@ -799,6 +829,10 @@ def run_experiment(
                 planning_coef=planning_coef_eff,
                 regime_name="stage4",
             )
+            if isinstance(upd, dict):
+                stage4_updates_stats.append(upd)
+        if stage4_updates_stats:
+            stage_metrics["stage4_train_stats"] = _mean_numeric_dict(stage4_updates_stats)
         stage_metrics["eval_after_stage4_self"] = trainer.evaluate(
             n_episodes=int(eval_episodes),
             max_steps=int(eval_max_steps),
@@ -958,6 +992,7 @@ def run_experiment(
             "planning_coef": planning_coef,
             "action_mask_internalization_coef": action_mask_internalization_coef,
             "action_mask_dropout_prob": float(action_mask_dropout_prob),
+            "action_mask_prediction_coef": float(action_mask_prediction_coef),
             "eval_max_steps": int(eval_max_steps),
             "eval_episodes": int(eval_episodes),
             "lifecycle_eval_episodes": int(lifecycle_eval_episodes),

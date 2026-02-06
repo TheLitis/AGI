@@ -33,6 +33,7 @@ def main(
     beta_uncertainty: float = None,
     action_mask_internalization_coef: float = None,
     action_mask_dropout_prob: float = None,
+    action_mask_prediction_coef: float = None,
     computer_scenarios: str = None,
     repo_scenarios: str = None,
     skill_mode: str = None,
@@ -166,6 +167,15 @@ def main(
             ),
         )
         parser.add_argument(
+            "--action-mask-pred-coef",
+            type=float,
+            default=0.10,
+            help=(
+                "Auxiliary BCE weight for predicting action-mask validity from policy features. "
+                "Helps internalize tool UI constraints."
+            ),
+        )
+        parser.add_argument(
             "--use-skills",
             action="store_true",
             help="Enable hierarchical skills and high-level policy.",
@@ -288,6 +298,7 @@ def main(
         beta_uncertainty = args.beta_uncertainty
         action_mask_internalization_coef = args.invalid_action_coef
         action_mask_dropout_prob = args.action_mask_dropout
+        action_mask_prediction_coef = args.action_mask_pred_coef
         agent_variant = args.agent_variant
         lifelong_episodes_per_chapter = args.lifelong_episodes_per_chapter
         use_skills = args.use_skills
@@ -333,6 +344,8 @@ def main(
             action_mask_internalization_coef = 0.10
         if action_mask_dropout_prob is None:
             action_mask_dropout_prob = 0.0
+        if action_mask_prediction_coef is None:
+            action_mask_prediction_coef = 0.10
         if agent_variant is None:
             agent_variant = "full"
         if lifelong_episodes_per_chapter is None:
@@ -409,6 +422,7 @@ def main(
         beta_uncertainty=beta_uncertainty,
         action_mask_internalization_coef=float(action_mask_internalization_coef),
         action_mask_dropout_prob=float(action_mask_dropout_prob),
+        action_mask_prediction_coef=float(action_mask_prediction_coef),
         log_dir=log_dir,
         run_id=run_id,
         lifelong_episodes_per_chapter=lifelong_episodes_per_chapter,

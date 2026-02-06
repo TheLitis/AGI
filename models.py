@@ -417,11 +417,22 @@ class Policy(nn.Module):
             nn.ReLU(),
         )
         self.pi_head = nn.Linear(64, n_actions)
+        # Auxiliary head that predicts action validity mask from the same features.
+        # Used for "mask internalization" in tool-like environments.
+        self.mask_head = nn.Linear(64, n_actions)
 
     def forward(self, G_t: torch.Tensor):
         h = self.shared(G_t)
+        return self.pi_head(h)
+
+    def forward_with_mask(self, G_t: torch.Tensor):
+        """
+        Return policy logits and auxiliary mask logits.
+        """
+        h = self.shared(G_t)
         logits = self.pi_head(h)
-        return logits
+        mask_logits = self.mask_head(h)
+        return logits, mask_logits
 
 
 class HighLevelPolicy(nn.Module):

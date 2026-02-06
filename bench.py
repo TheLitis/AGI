@@ -604,11 +604,44 @@ def _run_suite(
         pass_rate_unmasked = _safe_mean(unmasked_vals)
         mean_steps_unmasked = _safe_mean([float(x) for x in steps_vals])
         invalid_action_rate = None
+        mean_invalid_mass = None
+        mask_pred_f1 = None
+        mask_pred_auc = None
+        bc_pretrain_used = False
         action_mask_dropout_prob = None
+        invalid_vals: List[float] = []
+        mask_f1_vals: List[float] = []
+        mask_auc_vals: List[float] = []
         if run_records:
             cfg = (run_records[0].get("result") or {}).get("config", {})
             if isinstance(cfg, dict):
                 action_mask_dropout_prob = cfg.get("action_mask_dropout_prob")
+        for record in run_records:
+            res = record.get("result") or {}
+            if not isinstance(res, dict):
+                continue
+            stage_metrics = res.get("stage_metrics", {})
+            if isinstance(stage_metrics, dict):
+                train_stats = stage_metrics.get("stage4_train_stats", {})
+                if isinstance(train_stats, dict):
+                    v = train_stats.get("mean_invalid_action_mass")
+                    if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                        invalid_vals.append(float(v))
+                    f1 = train_stats.get("mask_pred_f1")
+                    if isinstance(f1, (int, float)) and math.isfinite(float(f1)):
+                        mask_f1_vals.append(float(f1))
+                    auc = train_stats.get("mask_pred_auc")
+                    if isinstance(auc, (int, float)) and math.isfinite(float(auc)):
+                        mask_auc_vals.append(float(auc))
+                if "repo_bc_pretrain" in stage_metrics:
+                    bc_pretrain_used = True
+        if invalid_vals:
+            mean_invalid_mass = _safe_mean(invalid_vals)
+            invalid_action_rate = mean_invalid_mass
+        if mask_f1_vals:
+            mask_pred_f1 = _safe_mean(mask_f1_vals)
+        if mask_auc_vals:
+            mask_pred_auc = _safe_mean(mask_auc_vals)
         if masked_only:
             pass_rate_unmasked = None
             mean_steps_unmasked = None
@@ -622,11 +655,11 @@ def _run_suite(
                 "pass_rate_unmasked": pass_rate_unmasked,
                 "mean_steps_to_pass_unmasked": mean_steps_unmasked,
                 "invalid_action_rate": invalid_action_rate,
-                "mask_pred_f1": None,
-                "mask_pred_auc": None,
-                "bc_pretrain_used": False,
+                "mask_pred_f1": mask_pred_f1,
+                "mask_pred_auc": mask_pred_auc,
+                "bc_pretrain_used": bool(bc_pretrain_used),
                 "action_mask_dropout_prob": action_mask_dropout_prob,
-                "mean_invalid_mass": None,
+                "mean_invalid_mass": mean_invalid_mass,
                 "ood_gap": None,
             }
         )
