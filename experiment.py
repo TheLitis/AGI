@@ -589,13 +589,13 @@ def run_experiment(
             stage_metrics["trait_reflection_log"] = log_entries
 
     # Initial evaluation
-        stage_metrics["eval_before_rl"] = trainer.evaluate(
-            n_episodes=int(eval_episodes),
-            max_steps=int(eval_max_steps),
-            use_self=False,
-            planning_coef=0.0,
-            eval_policy=eval_policy,
-        )
+    stage_metrics["eval_before_rl"] = trainer.evaluate(
+        n_episodes=int(eval_episodes),
+        max_steps=int(eval_max_steps),
+        use_self=False,
+        planning_coef=0.0,
+        eval_policy=eval_policy,
+    )
 
     # Stage 1: random exploration + world model
     if mode in {"all", "stage1", "stage2", "stage3", "stage3b", "stage3c", "stage4", "lifelong", "lifelong_train"}:
