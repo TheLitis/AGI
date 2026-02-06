@@ -4748,6 +4748,7 @@ class Trainer:
             lengths = []
             foods = []
             damages = []
+            timeout_episodes = 0
             scenario_counts: Dict[str, int] = {}
             env_counts: Dict[str, int] = {}
             train_returns = []
@@ -4962,6 +4963,9 @@ class Trainer:
                     last_reward = reward_env
                     last_action = action
 
+                if not done and t >= max_steps:
+                    timeout_episodes += 1
+
                 if isinstance(info, dict) and "last_test_passed" in info:
                     passed_flag = bool(info.get("last_test_passed"))
                     repo_pass_flags.append(passed_flag)
@@ -5078,6 +5082,7 @@ class Trainer:
                 "planning_coef": float(planning_coef),
                 "n_episodes": int(n_episodes),
                 "max_steps": int(max_steps),
+                "timeout_episodes": int(timeout_episodes),
                 "mean_return": mean_ret,
                 "std_return": std_ret,
                 "mean_length": mean_len,

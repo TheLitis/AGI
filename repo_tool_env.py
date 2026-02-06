@@ -71,7 +71,7 @@ class RepoTask:
 class RepoToolEnvConfig:
     sandbox_root: str = "repo_sandboxes"
     max_steps: int = 24
-    timeout_sec: float = 10.0
+    timeout_sec: float = 30.0
     patch_size: int = 5
     progress_token_max: int = 8
     hash_buckets: int = 64
@@ -585,6 +585,7 @@ class RepoToolEnv(BaseEnv):
         self.last_tests_passed: int = 0
         self.last_tests_total: int = 0
         self.last_pytest_output: str = ""
+        self.last_pytest_timeout: bool = False
         self.workspace_dirty: bool = True
         self.action_mask_enabled: bool = True
         # Failure focus state (used for inspection/tool-loop support).
@@ -687,6 +688,7 @@ class RepoToolEnv(BaseEnv):
         self.last_tests_passed = 0
         self.last_tests_total = 0
         self.last_pytest_output = ""
+        self.last_pytest_timeout = False
         self.focus_func = None
         self.focus_file = None
         self.focus_text = ""
@@ -1035,11 +1037,12 @@ class RepoToolEnv(BaseEnv):
             return
         if self.last_test_passed is not None:
             return
-        ok, passed, total, out = self._run_pytest()
+        ok, passed, total, out, timed_out = self._run_pytest()
         self.last_test_passed = bool(ok)
         self.last_tests_passed = int(passed)
         self.last_tests_total = int(total)
         self.last_pytest_output = out
+        self.last_pytest_timeout = bool(timed_out)
         self.workspace_dirty = False
         self._env_descriptor = self._compute_env_descriptor()
         self._update_failure_focus()
@@ -1064,6 +1067,7 @@ class RepoToolEnv(BaseEnv):
         self.last_tests_passed = 0
         self.last_tests_total = 0
         self.last_pytest_output = ""
+        self.last_pytest_timeout = False
         self.focus_func = None
         self.focus_file = None
         self.focus_text = ""
@@ -1755,36 +1759,38 @@ class RepoToolEnv(BaseEnv):
             expected_values=expected,
         )
 
-    def _run_pytest(self) -> Tuple[bool, int, int, str]:
+    def _run_pytest(self) -> Tuple[bool, int, int, str, bool]:
         if self.workdir is None:
             raise RuntimeError("RepoToolEnv pytest run before reset()")
         if self.workspace_dirty:
             self._clear_bytecode_cache()
         cmd = [sys.executable, "-B", "-m", "pytest", *list(self.config.pytest_args)]
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(self.workdir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        timed_out = False
         try:
-            completed = subprocess.run(
-                cmd,
-                cwd=str(self.workdir),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=float(self.config.timeout_sec),
-            )
-        except subprocess.TimeoutExpired as exc:
-            out = ""
-            if getattr(exc, "stdout", None):
-                out += str(exc.stdout)
-            if getattr(exc, "stderr", None):
-                out += "\n" + str(exc.stderr)
-            out = (out + "\n[timeout]").strip()
-            return False, 0, 0, out
+            stdout, stderr = proc.communicate(timeout=float(self.config.timeout_sec))
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            proc.kill()
+            stdout, stderr = proc.communicate()
 
-        out = (completed.stdout or "") + ("\n" + completed.stderr if completed.stderr else "")
+        out = (stdout or "") + ("\n" + stderr if stderr else "")
+        if timed_out:
+            out = (out + "\n[timeout]").strip()
+            return False, 0, 0, out, True
+
         passed, failed, errors = _parse_pytest_counts(out)
         total = passed + failed + errors
-        ok = completed.returncode == 0
-        return ok, passed, total, out.strip()
+        ok = proc.returncode == 0
+        return ok, passed, total, out.strip(), False
 
     def _clear_bytecode_cache(self) -> None:
         if self.workdir is None:
@@ -2113,14 +2119,17 @@ class RepoToolEnv(BaseEnv):
             if self.workspace_dirty or self.last_test_passed is None:
                 prev_progress = float(self._progress())
                 prev_candidates = int(len(self.current_task.patches or [])) if (toolloop and self.current_task is not None) else 0
-                ok, passed, total, out = self._run_pytest()
+                ok, passed, total, out, timed_out = self._run_pytest()
                 self.last_test_passed = bool(ok)
                 self.last_tests_passed = int(passed)
                 self.last_tests_total = int(total)
                 self.last_pytest_output = out
+                self.last_pytest_timeout = bool(timed_out)
                 self.workspace_dirty = False
                 self._env_descriptor = self._compute_env_descriptor()
                 self._update_failure_focus()
+                if timed_out:
+                    done = True
                 if (not bool(ok)) and self._is_toolloop_task(self.current_task):
                     sig = _pytest_failure_signature(out)
                     if sig != str(self._last_failure_sig_for_candidates or "") or not (self.current_task.patches or []):
@@ -2160,6 +2169,8 @@ class RepoToolEnv(BaseEnv):
             "tests_passed": int(self.last_tests_passed),
             "tests_total": int(self.last_tests_total),
             "last_test_passed": bool(self.last_test_passed) if self.last_test_passed is not None else None,
+            "pytest_timeout": bool(self.last_pytest_timeout),
+            "status": "timeout" if bool(self.last_pytest_timeout) else "ok",
             "death_flag": float(death_flag),
             "alive": float(alive),
             "steps_taken": int(self.steps_taken),

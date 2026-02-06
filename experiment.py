@@ -395,6 +395,17 @@ def run_experiment(
     action_mask_dropout_prob: float = 0.0,
     stage1_steps: int = 5000,
     stage1_batches: int = 200,
+    eval_max_steps: int = 200,
+    eval_episodes: int = 20,
+    lifecycle_eval_episodes: int = 20,
+    lifecycle_online_episodes: int = 50,
+    self_model_batches: int = 200,
+    self_reflection_batches: int = 200,
+    stage3c_batches: int = 50,
+    stage3c_collect_episodes: int = 10,
+    run_self_reflection: bool = True,
+    run_stage3c: bool = True,
+    run_lifecycle: bool = True,
     lifelong_episodes_per_chapter: int = 50,
     use_skills: bool = False,
     skill_mode: str = "handcrafted",
@@ -423,6 +434,17 @@ def run_experiment(
         planning_coef: RL hyperparameters (kept identical to original code).
         train_latent_skills: whether to run Stage 2.5 latent skill distillation (auto-enables for latent/mixed skills if None).
         stage1_steps, stage1_batches: world-model pretraining limits (for quick runs).
+        eval_max_steps: hard cap for evaluation episode length.
+        eval_episodes: number of episodes per evaluation call.
+        lifecycle_eval_episodes: episodes per lifecycle evaluation phase.
+        lifecycle_online_episodes: episodes for phase-C online adaptation.
+        self_model_batches: batches for offline self-model training.
+        self_reflection_batches: batches for trait reflection stage3b.
+        stage3c_batches: batches for stage3c self-model co-learning.
+        stage3c_collect_episodes: episodes collected in stage3c before training.
+        run_self_reflection: enable stage3b trait reflection.
+        run_stage3c: enable stage3c self-model co-learning.
+        run_lifecycle: enable lifecycle evaluation in stage4.
 
     Returns:
         Dict with "config" and "stage_metrics" plus metadata; all values are JSON-safe.
@@ -567,13 +589,13 @@ def run_experiment(
             stage_metrics["trait_reflection_log"] = log_entries
 
     # Initial evaluation
-    stage_metrics["eval_before_rl"] = trainer.evaluate(
-        n_episodes=10,
-        max_steps=200,
-        use_self=False,
-        planning_coef=0.0,
-        eval_policy=eval_policy,
-    )
+        stage_metrics["eval_before_rl"] = trainer.evaluate(
+            n_episodes=int(eval_episodes),
+            max_steps=int(eval_max_steps),
+            use_self=False,
+            planning_coef=0.0,
+            eval_policy=eval_policy,
+        )
 
     # Stage 1: random exploration + world model
     if mode in {"all", "stage1", "stage2", "stage3", "stage3b", "stage3c", "stage4", "lifelong", "lifelong_train"}:
@@ -610,8 +632,8 @@ def run_experiment(
                 regime_name="stage2",
             )
         stage_metrics["eval_after_stage2"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
+            n_episodes=int(eval_episodes),
+            max_steps=int(eval_max_steps),
             use_self=False,
             planning_coef=0.0,
             eval_policy=eval_policy,
@@ -641,18 +663,18 @@ def run_experiment(
 
     # Stage 3: self-model offline
     if agent_variant != "no_self" and mode in {"all", "stage3", "stage3b", "stage3c", "stage4", "lifelong", "lifelong_train"}:
-        trainer.train_self_model_offline()
+        trainer.train_self_model_offline(n_batches=int(self_model_batches))
         stage_metrics["self_model_probe_after_stage3"] = trainer.probe_self_model(gamma=gamma)
         stage_metrics["eval_after_stage3_no_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
+            n_episodes=int(eval_episodes),
+            max_steps=int(eval_max_steps),
             use_self=False,
             planning_coef=0.0,
             eval_policy=eval_policy,
         )
         stage_metrics["eval_after_stage3_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
+            n_episodes=int(eval_episodes),
+            max_steps=int(eval_max_steps),
             use_self=True,
             planning_coef=0.0,
             eval_policy=eval_policy,
@@ -673,18 +695,22 @@ def run_experiment(
             return result
 
     # Stage 3b/c: self-reflection on traits
-    if agent_variant == "full" and mode in {"all", "stage3b", "stage3c", "stage4", "lifelong", "lifelong_train"}:
-        trainer.self_reflect_on_traits()
+    if (
+        agent_variant == "full"
+        and run_self_reflection
+        and mode in {"all", "stage3b", "stage3c", "stage4", "lifelong", "lifelong_train"}
+    ):
+        trainer.self_reflect_on_traits(n_batches=int(self_reflection_batches))
         stage_metrics["eval_after_stage3c_no_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
+            n_episodes=int(eval_episodes),
+            max_steps=int(eval_max_steps),
             use_self=False,
             planning_coef=0.0,
             eval_policy=eval_policy,
         )
         stage_metrics["eval_after_stage3c_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
+            n_episodes=int(eval_episodes),
+            max_steps=int(eval_max_steps),
             use_self=True,
             planning_coef=0.0,
             eval_policy=eval_policy,
@@ -705,13 +731,18 @@ def run_experiment(
             return result
 
     # Stage 3c: self-model <-> traits co-learning
-    if agent_variant != "no_self" and mode in {"all", "stage3c", "stage4", "lifelong", "lifelong_train"}:
+    if (
+        agent_variant != "no_self"
+        and run_stage3c
+        and mode in {"all", "stage3c", "stage4", "lifelong", "lifelong_train"}
+    ):
         co_learn = trainer.run_stage3c_self_model_trait_co_learning(
-            n_collect_episodes=10,
-            max_steps=200,
+            n_collect_episodes=int(stage3c_collect_episodes),
+            max_steps=int(eval_max_steps),
             use_self_for_collection=True,
             planning_coef=0.0,
             split="train",
+            train_kwargs={"n_batches": int(stage3c_batches)},
             lr_scale=0.5,
             probe_gamma=gamma,
         )
@@ -723,15 +754,15 @@ def run_experiment(
                 if k not in {"probe_after"}
             }
         stage_metrics["eval_after_stage3c_no_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
+            n_episodes=int(eval_episodes),
+            max_steps=int(eval_max_steps),
             use_self=False,
             planning_coef=0.0,
             eval_policy=eval_policy,
         )
         stage_metrics["eval_after_stage3c_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
+            n_episodes=int(eval_episodes),
+            max_steps=int(eval_max_steps),
             use_self=True,
             planning_coef=0.0,
             eval_policy=eval_policy,
@@ -769,15 +800,15 @@ def run_experiment(
                 regime_name="stage4",
             )
         stage_metrics["eval_after_stage4_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
+            n_episodes=int(eval_episodes),
+            max_steps=int(eval_max_steps),
             use_self=True,
             planning_coef=planning_coef_eff,
             eval_policy=eval_policy,
         )
         stage_metrics["eval_after_stage4_no_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
+            n_episodes=int(eval_episodes),
+            max_steps=int(eval_max_steps),
             use_self=False,
             planning_coef=planning_coef_eff,
             eval_policy=eval_policy,
@@ -785,67 +816,68 @@ def run_experiment(
         stage_metrics["self_model_probe_after_stage4"] = trainer.probe_self_model(gamma=gamma)
 
         # Lifecycle phases A/B/C (train/test splits)
-        env_pool.set_phase("A")
-        stage_metrics["lifecycle_phaseA_no_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
-            use_self=False,
-            planning_coef=planning_coef_eff,
-            eval_policy=eval_policy,
-        )
+        if run_lifecycle:
+            env_pool.set_phase("A")
+            stage_metrics["lifecycle_phaseA_no_self"] = trainer.evaluate(
+                n_episodes=int(lifecycle_eval_episodes),
+                max_steps=int(eval_max_steps),
+                use_self=False,
+                planning_coef=planning_coef_eff,
+                eval_policy=eval_policy,
+            )
 
-        env_pool.set_phase("B")
-        stage_metrics["lifecycle_phaseB_no_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
-            use_self=False,
-            planning_coef=planning_coef_eff,
-            eval_policy=eval_policy,
-        )
-        stage_metrics["lifecycle_phaseB_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
-            use_self=True,
-            planning_coef=planning_coef_eff,
-            eval_policy=eval_policy,
-        )
+            env_pool.set_phase("B")
+            stage_metrics["lifecycle_phaseB_no_self"] = trainer.evaluate(
+                n_episodes=int(lifecycle_eval_episodes),
+                max_steps=int(eval_max_steps),
+                use_self=False,
+                planning_coef=planning_coef_eff,
+                eval_policy=eval_policy,
+            )
+            stage_metrics["lifecycle_phaseB_self"] = trainer.evaluate(
+                n_episodes=int(lifecycle_eval_episodes),
+                max_steps=int(eval_max_steps),
+                use_self=True,
+                planning_coef=planning_coef_eff,
+                eval_policy=eval_policy,
+            )
 
-        env_pool.set_phase("C")
-        stage_metrics["lifecycle_phaseC_no_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
-            use_self=False,
-            planning_coef=planning_coef_eff,
-            eval_policy=eval_policy,
-        )
-        stage_metrics["lifecycle_phaseC_self"] = trainer.evaluate(
-            n_episodes=20,
-            max_steps=200,
-            use_self=True,
-            planning_coef=planning_coef_eff,
-            eval_policy=eval_policy,
-        )
-        # Online Phase C adaptation (Phase D)
-        reflect_enabled = agent_variant == "full"
-        stage_metrics["lifecycle_phaseC_online_no_self"] = trainer.run_online_phaseC_adaptation(
-            env=env_pool,
-            n_episodes=50,
-            use_self=False,
-            planning_coef=planning_coef_eff,
-            phase_label="phaseC_online_no_self",
-            allow_reflection=False,
-        )
-        stage_metrics["lifecycle_phaseC_online_self"] = trainer.run_online_phaseC_adaptation(
-            env=env_pool,
-            n_episodes=50,
-            use_self=True,
-            planning_coef=planning_coef_eff,
-            phase_label="phaseC_online_self",
-            allow_reflection=reflect_enabled,
-        )
+            env_pool.set_phase("C")
+            stage_metrics["lifecycle_phaseC_no_self"] = trainer.evaluate(
+                n_episodes=int(lifecycle_eval_episodes),
+                max_steps=int(eval_max_steps),
+                use_self=False,
+                planning_coef=planning_coef_eff,
+                eval_policy=eval_policy,
+            )
+            stage_metrics["lifecycle_phaseC_self"] = trainer.evaluate(
+                n_episodes=int(lifecycle_eval_episodes),
+                max_steps=int(eval_max_steps),
+                use_self=True,
+                planning_coef=planning_coef_eff,
+                eval_policy=eval_policy,
+            )
+            # Online Phase C adaptation (Phase D)
+            reflect_enabled = agent_variant == "full"
+            stage_metrics["lifecycle_phaseC_online_no_self"] = trainer.run_online_phaseC_adaptation(
+                env=env_pool,
+                n_episodes=int(lifecycle_online_episodes),
+                use_self=False,
+                planning_coef=planning_coef_eff,
+                phase_label="phaseC_online_no_self",
+                allow_reflection=False,
+            )
+            stage_metrics["lifecycle_phaseC_online_self"] = trainer.run_online_phaseC_adaptation(
+                env=env_pool,
+                n_episodes=int(lifecycle_online_episodes),
+                use_self=True,
+                planning_coef=planning_coef_eff,
+                phase_label="phaseC_online_self",
+                allow_reflection=reflect_enabled,
+            )
 
-        # reset to default scheduling
-        env_pool.set_phase("")
+            # reset to default scheduling
+            env_pool.set_phase("")
 
     if mode == "lifelong":
         stage_metrics["lifelong_eval"] = trainer.run_lifelong_eval(
@@ -926,9 +958,20 @@ def run_experiment(
             "planning_coef": planning_coef,
             "action_mask_internalization_coef": action_mask_internalization_coef,
             "action_mask_dropout_prob": float(action_mask_dropout_prob),
+            "eval_max_steps": int(eval_max_steps),
+            "eval_episodes": int(eval_episodes),
+            "lifecycle_eval_episodes": int(lifecycle_eval_episodes),
+            "lifecycle_online_episodes": int(lifecycle_online_episodes),
+            "self_model_batches": int(self_model_batches),
+            "self_reflection_batches": int(self_reflection_batches),
+            "stage3c_batches": int(stage3c_batches),
+            "stage3c_collect_episodes": int(stage3c_collect_episodes),
+            "run_self_reflection": bool(run_self_reflection),
+            "run_stage3c": bool(run_stage3c),
+            "run_lifecycle": bool(run_lifecycle),
             "use_self": use_self_flag if mode in {"all", "stage4"} else agent_variant != "no_self",
             "use_planner": planning_coef > 0.0,
-            "do_self_reflection": agent_variant == "full",
+            "do_self_reflection": bool(agent_variant == "full" and run_self_reflection),
             "mode": mode,
             "agent_variant": agent_variant,
             "logdir": log_dir,

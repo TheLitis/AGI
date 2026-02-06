@@ -5,6 +5,7 @@ AGI-Bench runner: standardized suites, JSON report, and a skeleton AGI score.
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import json
 import math
 import subprocess
@@ -76,6 +77,39 @@ def _git_commit() -> str:
         return out.decode("utf-8", errors="replace").strip()
     except Exception:
         return "unknown"
+
+
+def _atomic_write_report(path: Path, payload: Dict[str, Any]) -> None:
+    partial_path = path.with_suffix(path.suffix + ".partial")
+    partial_path.write_text(
+        json.dumps(_sanitize(payload), ensure_ascii=False, indent=2, allow_nan=False),
+        encoding="utf-8",
+    )
+    partial_path.replace(path)
+
+
+def _refresh_overall(report: Dict[str, Any]) -> None:
+    suites = report.get("suites", [])
+    scores_used = [s.get("score") for s in suites if s.get("score") is not None and s.get("status") == "ok"]
+    agi_score = _geometric_mean([float(x) for x in scores_used if x is not None])
+    notes: List[str] = []
+    if agi_score is None:
+        agi_score = 0.0
+        notes.append("no_suite_scores_available")
+    report["overall"] = {
+        "agi_score": agi_score,
+        "notes": notes,
+        "gates": {
+            "gate0": "pass" if suites else "fail",
+            "gate1": "na",
+            "gate2": "na",
+        },
+    }
+
+
+def _save_report(report_path: Path, report: Dict[str, Any]) -> None:
+    _refresh_overall(report)
+    _atomic_write_report(report_path, report)
 
 
 @dataclass(frozen=True)
@@ -324,6 +358,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seeds", type=str, nargs="*", default=None, help="Seeds to run (CSV or space list).")
     parser.add_argument("--quick", action="store_true", help="Smaller/faster settings for runnable suites.")
     parser.add_argument("--ood", action="store_true", help="Use OOD splits where supported.")
+    parser.add_argument("--hang_dump_sec", type=int, default=600, help="Stack dump interval for hangs (0 disables).")
+    parser.add_argument(
+        "--max-episode-steps-eval",
+        type=int,
+        default=200,
+        help="Hard cap for eval episode steps (timeout guard).",
+    )
     mask_group = parser.add_mutually_exclusive_group()
     mask_group.add_argument("--masked", "--masked-only", dest="masked_only", action="store_true", help="Report masked metrics only (tools).")
     mask_group.add_argument("--unmasked", "--unmasked-only", dest="unmasked_only", action="store_true", help="Report unmasked metrics only (tools).")
@@ -357,30 +398,32 @@ def _run_suite(
     n_latent_skills: int,
     masked_only: bool,
     unmasked_only: bool,
+    eval_max_steps: int,
+    report: Dict[str, Any],
+    report_path: Path,
 ) -> Dict[str, Any]:
+    suite_result: Dict[str, Any] = {
+        "name": suite.name,
+        "status": "running",
+        "score": None,
+        "metrics": _metric_template(suite.name),
+        "per_env": [],
+        "notes": [],
+    }
+    report["suites"].append(suite_result)
+    _save_report(report_path, report)
+
     if suite.name == "safety":
-        metrics = _metric_template(suite.name)
-        metrics.update(_run_safety_smoke())
-        return {
-            "name": suite.name,
-            "status": "ok",
-            "score": None,
-            "metrics": metrics,
-            "per_env": [],
-            "notes": [],
-        }
+        suite_result["metrics"].update(_run_safety_smoke())
+        suite_result["status"] = "ok"
+        _save_report(report_path, report)
+        return suite_result
 
     if quick_stub or not suite.implemented:
-        metrics = _metric_template(suite.name)
-        status = "stub"
-        return {
-            "name": suite.name,
-            "status": status,
-            "score": None,
-            "metrics": metrics,
-            "per_env": [],
-            "notes": ["stubbed suite for Gate 0"],
-        }
+        suite_result["status"] = "stub"
+        suite_result["notes"].append("stubbed suite for Gate 0")
+        _save_report(report_path, report)
+        return suite_result
 
     episodes_per_phase = 50
     n_steps = 1024
@@ -390,6 +433,16 @@ def _run_suite(
     lifelong_eps = 50
     stage1_steps = 5000
     stage1_batches = 200
+    eval_episodes = 20
+    lifecycle_eval_episodes = 20
+    lifecycle_online_episodes = 50
+    self_model_batches = 200
+    self_reflection_batches = 200
+    stage3c_batches = 50
+    stage3c_collect_episodes = 10
+    run_self_reflection = True
+    run_stage3c = True
+    run_lifecycle = True
     if quick:
         episodes_per_phase = 8
         n_steps = 128
@@ -399,72 +452,135 @@ def _run_suite(
         lifelong_eps = 10
         stage1_steps = 200
         stage1_batches = 10
+        eval_episodes = 3
+        lifecycle_eval_episodes = 2
+        lifecycle_online_episodes = 2
+        self_model_batches = 20
+        self_reflection_batches = 5
+        stage3c_batches = 5
+        stage3c_collect_episodes = 2
+        run_self_reflection = False
+        run_stage3c = False
+        run_lifecycle = False
 
     run_records: List[Dict[str, Any]] = []
+    any_error = False
+    any_timeout = False
+
+    report["meta"]["config"].update(
+        {
+            "eval_episodes": int(eval_episodes),
+            "lifecycle_eval_episodes": int(lifecycle_eval_episodes),
+            "lifecycle_online_episodes": int(lifecycle_online_episodes),
+            "self_model_batches": int(self_model_batches),
+            "self_reflection_batches": int(self_reflection_batches),
+            "stage3c_batches": int(stage3c_batches),
+            "stage3c_collect_episodes": int(stage3c_collect_episodes),
+            "run_self_reflection": bool(run_self_reflection),
+            "run_stage3c": bool(run_stage3c),
+            "run_lifecycle": bool(run_lifecycle),
+        }
+    )
+    _save_report(report_path, report)
+
     for case in suite.cases:
         for variant in variants:
             for seed in seeds:
                 run_id = f"bench_{suite.name}_{case.name}_{variant}_seed{seed}"
                 print(f"[BENCH] suite={suite.name} case={case.name} env={case.env_type} variant={variant} seed={seed}")
-                res = run_experiment(
-                    seed=int(seed),
-                    mode=str(mode),
-                    agent_variant=str(variant),
-                    env_type=str(case.env_type),
-                    schedule_mode="iid",
-                    episodes_per_phase=int(episodes_per_phase),
-                    n_steps=int(n_steps),
-                    stage2_updates=1,
-                    stage4_updates=1,
-                    planning_horizon=int(planning_horizon),
-                    planner_mode="rollout",
-                    planner_rollouts=int(planner_rollouts),
-                    planning_coef=float(planning_coef),
-                    lifelong_episodes_per_chapter=int(lifelong_eps),
-                    minigrid_scenarios=case.minigrid_scenarios,
-                    computer_scenarios=case.computer_scenarios,
-                    repo_scenarios=case.repo_scenarios,
-                    log_dir=str(log_dir),
-                    run_id=run_id,
-                    use_skills=bool(use_skills),
-                    skill_mode=str(skill_mode),
-                    n_latent_skills=int(n_latent_skills),
-                    stage1_steps=int(stage1_steps),
-                    stage1_batches=int(stage1_batches),
-                )
+                status = "ok"
+                error_msg = None
+                res: Dict[str, Any] = {}
+                try:
+                    res = run_experiment(
+                        seed=int(seed),
+                        mode=str(mode),
+                        agent_variant=str(variant),
+                        env_type=str(case.env_type),
+                        schedule_mode="iid",
+                        episodes_per_phase=int(episodes_per_phase),
+                        n_steps=int(n_steps),
+                        stage2_updates=1,
+                        stage4_updates=1,
+                        planning_horizon=int(planning_horizon),
+                        planner_mode="rollout",
+                        planner_rollouts=int(planner_rollouts),
+                        planning_coef=float(planning_coef),
+                        lifelong_episodes_per_chapter=int(lifelong_eps),
+                        minigrid_scenarios=case.minigrid_scenarios,
+                        computer_scenarios=case.computer_scenarios,
+                        repo_scenarios=case.repo_scenarios,
+                        log_dir=str(log_dir),
+                        run_id=run_id,
+                        use_skills=bool(use_skills),
+                        skill_mode=str(skill_mode),
+                        n_latent_skills=int(n_latent_skills),
+                        stage1_steps=int(stage1_steps),
+                        stage1_batches=int(stage1_batches),
+                        eval_max_steps=int(eval_max_steps),
+                        eval_episodes=int(eval_episodes),
+                        lifecycle_eval_episodes=int(lifecycle_eval_episodes),
+                        lifecycle_online_episodes=int(lifecycle_online_episodes),
+                        self_model_batches=int(self_model_batches),
+                        self_reflection_batches=int(self_reflection_batches),
+                        stage3c_batches=int(stage3c_batches),
+                        stage3c_collect_episodes=int(stage3c_collect_episodes),
+                        run_self_reflection=bool(run_self_reflection),
+                        run_stage3c=bool(run_stage3c),
+                        run_lifecycle=bool(run_lifecycle),
+                    )
+                except Exception as exc:
+                    status = "error"
+                    error_msg = f"{type(exc).__name__}: {exc}"
+                    any_error = True
+
+                eval_metrics = _extract_eval_metrics(res or {})
+                timeout_eps = 0
+                if isinstance(eval_metrics, dict):
+                    timeout_eps = int(eval_metrics.get("timeout_episodes", 0) or 0)
+                if timeout_eps > 0 and status == "ok":
+                    status = "timeout"
+                    any_timeout = True
+
+                pass_masked, pass_unmasked, steps_unmasked = _extract_repo_metrics(eval_metrics)
+                mean_steps_unmasked = _safe_mean([float(x) for x in steps_unmasked])
+                pass_flag = None
+                if pass_unmasked is not None:
+                    pass_flag = bool(float(pass_unmasked) >= 0.5)
+                elif pass_masked is not None:
+                    pass_flag = bool(float(pass_masked) >= 0.5)
+                if status in {"error", "timeout"}:
+                    pass_flag = False
+
+                per_env_entry: Dict[str, Any] = {
+                    "env": _case_label(case),
+                    "seed": int(seed),
+                    "variant": str(variant),
+                    "status": status,
+                    "pass": pass_flag,
+                    "pass_rate_masked": pass_masked,
+                    "pass_rate_unmasked": pass_unmasked,
+                    "steps": mean_steps_unmasked,
+                    "invalid_rate": None,
+                }
+                if error_msg:
+                    per_env_entry["error"] = error_msg
+                    suite_result["notes"].append(error_msg)
+                if timeout_eps > 0:
+                    per_env_entry["timeout_episodes"] = timeout_eps
+
+                suite_result["per_env"].append(per_env_entry)
                 run_records.append(
                     {
                         "case": case,
                         "variant": variant,
                         "seed": seed,
                         "result": res,
-                        "eval": _extract_eval_metrics(res or {}),
+                        "eval": eval_metrics,
+                        "status": status,
                     }
                 )
-
-    per_env: List[Dict[str, Any]] = []
-    for record in run_records:
-        case = record["case"]
-        eval_metrics = record.get("eval")
-        pass_masked, pass_unmasked, steps_unmasked = _extract_repo_metrics(eval_metrics)
-        mean_steps_unmasked = _safe_mean([float(x) for x in steps_unmasked])
-        pass_flag = None
-        if pass_unmasked is not None:
-            pass_flag = bool(float(pass_unmasked) >= 0.5)
-        elif pass_masked is not None:
-            pass_flag = bool(float(pass_masked) >= 0.5)
-        per_env.append(
-            {
-                "env": _case_label(case),
-                "seed": int(record["seed"]),
-                "variant": str(record["variant"]),
-                "pass": pass_flag,
-                "pass_rate_masked": pass_masked,
-                "pass_rate_unmasked": pass_unmasked,
-                "steps": mean_steps_unmasked,
-                "invalid_rate": None,
-            }
-        )
+                _save_report(report_path, report)
 
     metrics = _metric_template(suite.name)
     score = None
@@ -475,7 +591,7 @@ def _run_suite(
         steps_vals: List[int] = []
         for record in run_records:
             case = record["case"]
-            if case.env_type != "repo":
+            if case.env_type != "repo" or record.get("status") != "ok":
                 continue
             eval_metrics = record.get("eval")
             pass_masked, pass_unmasked, steps_unmasked = _extract_repo_metrics(eval_metrics)
@@ -488,6 +604,11 @@ def _run_suite(
         pass_rate_unmasked = _safe_mean(unmasked_vals)
         mean_steps_unmasked = _safe_mean([float(x) for x in steps_vals])
         invalid_action_rate = None
+        action_mask_dropout_prob = None
+        if run_records:
+            cfg = (run_records[0].get("result") or {}).get("config", {})
+            if isinstance(cfg, dict):
+                action_mask_dropout_prob = cfg.get("action_mask_dropout_prob")
         if masked_only:
             pass_rate_unmasked = None
             mean_steps_unmasked = None
@@ -504,7 +625,7 @@ def _run_suite(
                 "mask_pred_f1": None,
                 "mask_pred_auc": None,
                 "bc_pretrain_used": False,
-                "action_mask_dropout_prob": None,
+                "action_mask_dropout_prob": action_mask_dropout_prob,
                 "mean_invalid_mass": None,
                 "ood_gap": None,
             }
@@ -514,11 +635,15 @@ def _run_suite(
         mean_returns = []
         test_returns = []
         for record in run_records:
+            if record.get("status") != "ok":
+                continue
             eval_metrics = record.get("eval") or {}
-            if "mean_return" in eval_metrics:
-                mean_returns.append(float(eval_metrics["mean_return"]))
-            if "test_mean_return" in eval_metrics:
-                test_returns.append(float(eval_metrics["test_mean_return"]))
+            mean_val = eval_metrics.get("mean_return")
+            if mean_val is not None:
+                mean_returns.append(float(mean_val))
+            test_val = eval_metrics.get("test_mean_return")
+            if test_val is not None:
+                test_returns.append(float(test_val))
         metrics.update(
             {
                 "mean_return": _safe_mean(mean_returns),
@@ -527,14 +652,17 @@ def _run_suite(
             }
         )
 
-    return {
-        "name": suite.name,
-        "status": "ok",
-        "score": score,
-        "metrics": metrics,
-        "per_env": per_env,
-        "notes": notes,
-    }
+    suite_result["metrics"] = metrics
+    suite_result["score"] = score
+    suite_status = "ok"
+    if any_error:
+        suite_status = "error"
+    elif any_timeout:
+        suite_status = "timeout"
+    suite_result["status"] = suite_status
+    suite_result["notes"].extend(notes)
+    _save_report(report_path, report)
+    return suite_result
 
 
 def main() -> int:
@@ -542,6 +670,11 @@ def main() -> int:
     ts = int(time.time())
     report_path = Path(args.report or (Path("reports") / f"bench_{args.suite}_{ts}.json"))
     report_path.parent.mkdir(parents=True, exist_ok=True)
+
+    hang_sec = int(args.hang_dump_sec or 0)
+    if hang_sec > 0:
+        faulthandler.enable()
+        faulthandler.dump_traceback_later(hang_sec, repeat=True)
 
     variants = [v.strip() for v in str(args.variants).split(",") if v.strip()]
     seeds = _parse_seeds(args.seeds)
@@ -566,36 +699,7 @@ def main() -> int:
         selected = [args.suite]
         quick_stub = False
 
-    suites: List[Dict[str, Any]] = []
-    for name in selected:
-        spec = suite_specs.get(name)
-        if spec is None:
-            continue
-        suites.append(
-            _run_suite(
-                spec,
-                seeds=seeds,
-                variants=variants,
-                mode=args.mode,
-                quick=bool(args.quick),
-                quick_stub=quick_stub,
-                log_dir=str(args.log_dir),
-                use_skills=bool(args.use_skills),
-                skill_mode=str(args.skill_mode),
-                n_latent_skills=int(args.n_latent_skills),
-                masked_only=bool(args.masked_only),
-                unmasked_only=bool(args.unmasked_only),
-            )
-        )
-
-    scores_used = [s["score"] for s in suites if s.get("score") is not None and s.get("status") == "ok"]
-    agi_score = _geometric_mean([float(x) for x in scores_used if x is not None])
-    overall_notes: List[str] = []
-    if agi_score is None:
-        agi_score = 0.0
-        overall_notes.append("no_suite_scores_available")
-
-    report = {
+    report: Dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "meta": {
             "timestamp": int(ts),
@@ -612,23 +716,49 @@ def main() -> int:
                 "n_latent_skills": int(args.n_latent_skills),
                 "masked_only": bool(args.masked_only),
                 "unmasked_only": bool(args.unmasked_only),
+                "eval_max_steps": int(args.max_episode_steps_eval),
             },
         },
         "overall": {
-            "agi_score": agi_score,
-            "notes": overall_notes,
+            "agi_score": 0.0,
+            "notes": [],
             "gates": {
-                "gate0": "pass" if suites else "fail",
+                "gate0": "fail",
                 "gate1": "na",
                 "gate2": "na",
             },
         },
-        "suites": suites,
+        "suites": [],
     }
+    _save_report(report_path, report)
 
-    tmp_path = report_path.with_suffix(report_path.suffix + ".tmp")
-    tmp_path.write_text(json.dumps(_sanitize(report), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
-    tmp_path.replace(report_path)
+    try:
+        for name in selected:
+            spec = suite_specs.get(name)
+            if spec is None:
+                continue
+            _run_suite(
+                spec,
+                seeds=seeds,
+                variants=variants,
+                mode=args.mode,
+                quick=bool(args.quick),
+                quick_stub=quick_stub,
+                log_dir=str(args.log_dir),
+                use_skills=bool(args.use_skills),
+                skill_mode=str(args.skill_mode),
+                n_latent_skills=int(args.n_latent_skills),
+                masked_only=bool(args.masked_only),
+                unmasked_only=bool(args.unmasked_only),
+                eval_max_steps=int(args.max_episode_steps_eval),
+                report=report,
+                report_path=report_path,
+            )
+    except KeyboardInterrupt:
+        _save_report(report_path, report)
+        raise
+
+    _save_report(report_path, report)
     print(f"[BENCH] Saved: {report_path}")
     return 0
 
