@@ -238,6 +238,74 @@ def _tools_score(
     return float(pass_component * invalid_component * steps_component)
 
 
+def _bounded_return_score(value: Optional[float], *, center: float = 0.0, scale: float = 10.0) -> Optional[float]:
+    if value is None:
+        return None
+    if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        return None
+    denom = max(1e-6, float(scale))
+    v = float(value)
+    return float(1.0 / (1.0 + math.exp(-(v - float(center)) / denom)))
+
+
+def _core_score(
+    mean_return: Optional[float],
+    test_mean_return: Optional[float],
+    *,
+    center: float = 0.0,
+    scale: float = 10.0,
+) -> Optional[float]:
+    """
+    Squash returns to [0,1] and average train/test components.
+    This provides a bounded score while preserving monotonicity.
+    """
+
+    vals: List[float] = []
+    if isinstance(mean_return, (int, float)) and math.isfinite(float(mean_return)):
+        vals.append(float(mean_return))
+    if isinstance(test_mean_return, (int, float)) and math.isfinite(float(test_mean_return)):
+        vals.append(float(test_mean_return))
+    if not vals:
+        return None
+    denom = max(1e-6, float(scale))
+    comps = [1.0 / (1.0 + math.exp(-(v - float(center)) / denom)) for v in vals]
+    return float(sum(comps) / len(comps))
+
+
+def _language_score(pass_rate: Optional[float], ood_pass_rate: Optional[float]) -> Optional[float]:
+    if pass_rate is None:
+        return None
+    p = max(0.0, min(1.0, float(pass_rate)))
+    if ood_pass_rate is None:
+        return p
+    ood = max(0.0, min(1.0, float(ood_pass_rate)))
+    return float(min(p, ood))
+
+
+def _social_score(success_rate: Optional[float], transfer_rate: Optional[float]) -> Optional[float]:
+    if success_rate is None:
+        return None
+    s = max(0.0, min(1.0, float(success_rate)))
+    if transfer_rate is None:
+        return s
+    t = max(0.0, min(1.0, float(transfer_rate)))
+    return float(min(s, t))
+
+
+def _lifelong_score(forgetting_gap: Optional[float], forward_transfer: Optional[float]) -> Optional[float]:
+    if forgetting_gap is None and forward_transfer is None:
+        return None
+    forget_component = 1.0
+    if isinstance(forgetting_gap, (int, float)) and math.isfinite(float(forgetting_gap)):
+        # Near-zero forgetting is best.
+        forget_component = max(0.0, min(1.0, float(math.exp(-abs(float(forgetting_gap)) / 5.0))))
+    forward_component = 1.0
+    bounded_forward = _bounded_return_score(forward_transfer, center=0.0, scale=5.0)
+    if bounded_forward is not None:
+        forward_component = bounded_forward
+    return float(forget_component * forward_component)
+
+
 def _run_safety_smoke() -> Dict[str, Any]:
     try:
         import torch
@@ -304,21 +372,27 @@ def _build_suite_specs(
         ),
         "language": SuiteSpec(
             name="language",
-            cases=[],
-            implemented=False,
-            description="Placeholder for language causality suites.",
+            cases=[
+                BenchCase(name="instruction_basic", env_type="instruction"),
+            ],
+            implemented=True,
+            description="Instruction-following/generalization suite.",
         ),
         "social": SuiteSpec(
             name="social",
-            cases=[],
-            implemented=False,
-            description="Placeholder for social/ToM suites.",
+            cases=[
+                BenchCase(name="social_basic", env_type="social"),
+            ],
+            implemented=True,
+            description="Social interaction/transfer suite.",
         ),
         "lifelong": SuiteSpec(
             name="lifelong",
-            cases=[],
-            implemented=False,
-            description="Placeholder for continual learning suites.",
+            cases=[
+                BenchCase(name="lifelong_gridworld", env_type="gridworld"),
+            ],
+            implemented=True,
+            description="Continual adaptation/forgetting suite.",
         ),
         "safety": SuiteSpec(
             name="safety",
@@ -510,6 +584,7 @@ def _run_suite(
                     repo_online_bc_coef = 0.10
                     action_mask_dropout_prob = 0.0
                     run_force_cpu = bool(force_cpu)
+                    run_mode = str(mode)
                     if str(case.env_type) == "repo":
                         # Gate-1 tuned defaults from local sweep:
                         # online_bc=0.0, bc_eps=32, mask_drop=0.2
@@ -517,9 +592,12 @@ def _run_suite(
                         repo_online_bc_coef = 0.0
                         action_mask_dropout_prob = 0.20
                         run_force_cpu = bool(run_force_cpu or auto_force_cpu_repo)
+                    if suite.name == "lifelong":
+                        run_mode = "lifelong"
+                        run_lifecycle = True
                     res = run_experiment(
                         seed=int(seed),
-                        mode=str(mode),
+                        mode=run_mode,
                         agent_variant=str(variant),
                         env_type=str(case.env_type),
                         schedule_mode="iid",
@@ -568,9 +646,7 @@ def _run_suite(
                 timeout_eps = 0
                 if isinstance(eval_metrics, dict):
                     timeout_eps = int(eval_metrics.get("timeout_episodes", 0) or 0)
-                if timeout_eps >= int(eval_episodes) and status == "ok":
-                    status = "timeout"
-                    any_timeout = True
+                capped_all_eps = timeout_eps >= int(eval_episodes)
 
                 pass_masked, pass_unmasked, steps_unmasked = _extract_repo_metrics(eval_metrics)
                 mean_steps_unmasked = _safe_mean([float(x) for x in steps_unmasked])
@@ -598,6 +674,11 @@ def _run_suite(
                     suite_result["notes"].append(error_msg)
                 if timeout_eps > 0:
                     per_env_entry["timeout_episodes"] = timeout_eps
+                    if capped_all_eps:
+                        per_env_entry["capped_all_eval_episodes"] = True
+                        suite_result["notes"].append(
+                            f"eval_step_cap_reached_for_all_episodes:{_case_label(case)}:seed={int(seed)}"
+                        )
 
                 suite_result["per_env"].append(per_env_entry)
                 run_records.append(
@@ -719,6 +800,89 @@ def _run_suite(
                 "ood_gap": None,
             }
         )
+        score = _core_score(metrics.get("mean_return"), metrics.get("test_mean_return"))
+    elif suite.name == "language":
+        pass_scores: List[float] = []
+        ood_scores: List[float] = []
+        for record in run_records:
+            if record.get("status") != "ok":
+                continue
+            eval_metrics = record.get("eval") or {}
+            p = _bounded_return_score(eval_metrics.get("mean_return"), center=0.0, scale=1.0)
+            if p is not None:
+                pass_scores.append(float(p))
+            ood = _bounded_return_score(eval_metrics.get("test_mean_return"), center=0.0, scale=1.0)
+            if ood is not None:
+                ood_scores.append(float(ood))
+        pass_rate = _safe_mean(pass_scores)
+        ood_pass_rate = _safe_mean(ood_scores)
+        causal_drop = None
+        if pass_rate is not None and ood_pass_rate is not None:
+            causal_drop = max(0.0, float(pass_rate) - float(ood_pass_rate))
+        metrics.update(
+            {
+                "pass_rate": pass_rate,
+                "ood_pass_rate": ood_pass_rate,
+                "causal_drop": causal_drop,
+            }
+        )
+        score = _language_score(pass_rate, ood_pass_rate)
+    elif suite.name == "social":
+        success_vals: List[float] = []
+        transfer_vals: List[float] = []
+        for record in run_records:
+            if record.get("status") != "ok":
+                continue
+            eval_metrics = record.get("eval") or {}
+            s = _bounded_return_score(eval_metrics.get("mean_return"), center=0.0, scale=1.0)
+            if s is not None:
+                success_vals.append(float(s))
+            t = _bounded_return_score(eval_metrics.get("test_mean_return"), center=0.0, scale=1.0)
+            if t is not None:
+                transfer_vals.append(float(t))
+        success_rate = _safe_mean(success_vals)
+        transfer_rate = _safe_mean(transfer_vals)
+        metrics.update(
+            {
+                "success_rate": success_rate,
+                "transfer_rate": transfer_rate,
+            }
+        )
+        score = _social_score(success_rate, transfer_rate)
+    elif suite.name == "lifelong":
+        forgetting_vals: List[float] = []
+        transfer_vals: List[float] = []
+        for record in run_records:
+            if record.get("status") != "ok":
+                continue
+            res = record.get("result") or {}
+            if not isinstance(res, dict):
+                continue
+            stage_metrics = res.get("stage_metrics", {})
+            if not isinstance(stage_metrics, dict):
+                continue
+            ll = stage_metrics.get("lifelong_eval", {})
+            if not isinstance(ll, dict):
+                continue
+            fg = ll.get("lifelong_forgetting_R1_gap")
+            if isinstance(fg, (int, float)) and math.isfinite(float(fg)):
+                forgetting_vals.append(float(fg))
+            ft_parts: List[float] = []
+            for key in ("lifelong_adaptation_R2_delta", "lifelong_adaptation_R3_delta"):
+                v = ll.get(key)
+                if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                    ft_parts.append(float(v))
+            if ft_parts:
+                transfer_vals.append(float(sum(ft_parts) / len(ft_parts)))
+        forgetting_gap = _safe_mean(forgetting_vals)
+        forward_transfer = _safe_mean(transfer_vals)
+        metrics.update(
+            {
+                "forgetting_gap": forgetting_gap,
+                "forward_transfer": forward_transfer,
+            }
+        )
+        score = _lifelong_score(forgetting_gap, forward_transfer)
 
     suite_result["metrics"] = metrics
     suite_result["score"] = score
