@@ -2407,6 +2407,31 @@ class Trainer:
         )
         return float(r)
 
+    @staticmethod
+    def _infer_episode_success_from_info(ep_info: Dict[str, Any]) -> Optional[bool]:
+        """
+        Best-effort terminal success inference across repo/instruction/social env families.
+        """
+        if not isinstance(ep_info, dict):
+            return None
+        if "last_test_passed" in ep_info:
+            return bool(ep_info.get("last_test_passed"))
+
+        reason = str(ep_info.get("reason", "")).strip().lower()
+        if reason in {"took_correct_goal", "you_got_food", "food_collected"}:
+            return True
+        if reason in {"took_wrong_goal", "other_got_food", "max_steps", "energy_depleted"}:
+            return False
+
+        reward_env = ep_info.get("reward_env")
+        if isinstance(reward_env, (int, float)) and math.isfinite(float(reward_env)):
+            v = float(reward_env)
+            if v > 0.0:
+                return True
+            if v < 0.0:
+                return False
+        return None
+
     def _record_regime_stats(
         self,
         regime_name: str,
@@ -4183,11 +4208,16 @@ class Trainer:
                 env_id = int(next_obs.get("env_id", env_id))
 
                 if done:
-                    solved_flag = bool(info.get("last_test_passed", False))
-                    if not solved_flag:
+                    solved_flag = self._infer_episode_success_from_info(info)
+                    if solved_flag is None:
                         env_inst = self._get_active_env_instance()
-                        solved_flag = bool(getattr(env_inst, "last_test_passed", False))
-                    if solved_flag:
+                        fallback_info = {
+                            "last_test_passed": getattr(env_inst, "last_test_passed", None),
+                            "reason": info.get("reason", ""),
+                            "reward_env": info.get("reward_env", None),
+                        }
+                        solved_flag = self._infer_episode_success_from_info(fallback_info)
+                    if solved_flag is True:
                         solved += 1
                     break
 
@@ -5153,21 +5183,6 @@ class Trainer:
             social_success_flags_train: List[bool] = []
             social_success_flags_test: List[bool] = []
 
-            def _episode_success(ep_info: Dict[str, Any]) -> Optional[bool]:
-                if not isinstance(ep_info, dict):
-                    return None
-                if "last_test_passed" in ep_info:
-                    return bool(ep_info.get("last_test_passed"))
-                reason = str(ep_info.get("reason", "")).strip().lower()
-                if reason in {"took_correct_goal", "you_got_food", "food_collected"}:
-                    return True
-                if reason in {"took_wrong_goal", "other_got_food"}:
-                    return False
-                reward_env = ep_info.get("reward_env")
-                if isinstance(reward_env, (int, float)) and math.isfinite(float(reward_env)):
-                    return bool(float(reward_env) > 0.0)
-                return None
-
             for _ in range(n_episodes):
                 obs = self.env.reset()
                 scenario_name = getattr(
@@ -5445,7 +5460,7 @@ class Trainer:
                         family = "instruction-basic"
                     elif "social" in env_name_l:
                         family = "social-basic"
-                success_flag = _episode_success(info)
+                success_flag = self._infer_episode_success_from_info(info)
                 if success_flag is not None:
                     if "instruction" in family:
                         instruction_success_flags.append(bool(success_flag))
