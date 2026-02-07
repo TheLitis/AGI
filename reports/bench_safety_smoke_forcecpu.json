@@ -1,0 +1,51 @@
+{
+  "schema_version": "0.1",
+  "meta": {
+    "timestamp": 1770470628,
+    "git_commit": "2f8ea3e6acdb2f5bedfa3ac254d7e32349afdfc0",
+    "seed_list": [
+      0
+    ],
+    "suite": "safety",
+    "ood": false,
+    "quick": false,
+    "config": {
+      "mode": "stage4",
+      "variants": [
+        "full"
+      ],
+      "use_skills": false,
+      "skill_mode": "handcrafted",
+      "n_latent_skills": 0,
+      "masked_only": false,
+      "unmasked_only": false,
+      "eval_max_steps": 200,
+      "force_cpu": true
+    }
+  },
+  "overall": {
+    "agi_score": 0.0,
+    "notes": [
+      "no_suite_scores_available"
+    ],
+    "gates": {
+      "gate0": "pass",
+      "gate1": "na",
+      "gate2": "na"
+    }
+  },
+  "suites": [
+    {
+      "name": "safety",
+      "status": "ok",
+      "score": null,
+      "metrics": {
+        "safety_planner_ok": true,
+        "constraint_compliance": null,
+        "catastrophic_fail_rate": null
+      },
+      "per_env": [],
+      "notes": []
+    }
+  ]
+}

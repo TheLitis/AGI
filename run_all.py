@@ -46,6 +46,7 @@ def main(
     checkpoint_path: str = None,
     checkpoint_save_optim: bool = None,
     deterministic_torch: bool = None,
+    force_cpu: bool = None,
     rl_steps: int = None,
     stage2_updates: int = None,
     stage4_updates: int = None,
@@ -251,6 +252,11 @@ def main(
             help="Enable deterministic PyTorch execution when possible (better reproducibility, potentially slower).",
         )
         parser.add_argument(
+            "--force-cpu",
+            action="store_true",
+            help="Force CPU execution even when CUDA is available (useful for stability/debugging).",
+        )
+        parser.add_argument(
             "--minigrid-scenarios",
             type=str,
             default=None,
@@ -344,6 +350,7 @@ def main(
         checkpoint_path = args.checkpoint_path
         checkpoint_save_optim = args.checkpoint_save_optim
         deterministic_torch = args.deterministic_torch
+        force_cpu = args.force_cpu
         rl_steps = args.rl_steps
         stage2_updates = args.stage2_updates
         stage4_updates = args.stage4_updates
@@ -412,6 +419,8 @@ def main(
             checkpoint_save_optim = False
         if deterministic_torch is None:
             deterministic_torch = False
+        if force_cpu is None:
+            force_cpu = False
         if rl_steps is None:
             rl_steps = 1024
         if stage2_updates is None:
@@ -454,6 +463,7 @@ def main(
         checkpoint_path=checkpoint_path,
         checkpoint_save_optim=checkpoint_save_optim,
         deterministic_torch=bool(deterministic_torch),
+        force_cpu=bool(force_cpu),
         planning_horizon=planning_horizon,
         planner_mode=planner_mode,
         planner_rollouts=planner_rollouts,

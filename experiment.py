@@ -433,6 +433,7 @@ def run_experiment(
     checkpoint_path: Optional[str] = None,
     checkpoint_save_optim: bool = True,
     deterministic_torch: bool = False,
+    force_cpu: bool = False,
 ) -> Dict[str, Any]:
     """
     Run the staged training pipeline and return metrics.
@@ -469,7 +470,10 @@ def run_experiment(
         Dict with "config" and "stage_metrics" plus metadata; all values are JSON-safe.
     """
     _set_global_seeds(seed, deterministic_torch=bool(deterministic_torch))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cuda_available = bool(torch.cuda.is_available())
+    force_cpu_flag = bool(force_cpu)
+    use_cuda = cuda_available and not force_cpu_flag
+    device = torch.device("cuda" if use_cuda else "cpu")
 
     print(
         "[Config] "
@@ -480,7 +484,8 @@ def run_experiment(
         f"action_mask_dropout_prob={float(action_mask_dropout_prob):.3f}, "
         f"action_mask_pred_coef={float(action_mask_prediction_coef):.3f}, "
         f"repo_online_bc_coef={float(repo_online_bc_coef):.3f}, "
-        f"repo_bc_eps={int(max(0, repo_bc_pretrain_episodes))}"
+        f"repo_bc_eps={int(max(0, repo_bc_pretrain_episodes))}, "
+        f"device={device}, force_cpu={force_cpu_flag}"
     )
 
     env_choice = (env_type or "gridworld").lower()
@@ -1052,6 +1057,7 @@ def run_experiment(
             "n_latent_skills": n_latent_skills,
             "train_latent_skills": bool(train_latent_flag),
             "deterministic_torch": bool(deterministic_torch),
+            "force_cpu": bool(force_cpu_flag),
         },
     }
 

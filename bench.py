@@ -365,6 +365,16 @@ def parse_args() -> argparse.Namespace:
         default=200,
         help="Hard cap for eval episode steps (timeout guard).",
     )
+    parser.add_argument(
+        "--force-cpu",
+        action="store_true",
+        help="Force CPU execution for all suite runs (recommended on unstable CUDA setups).",
+    )
+    parser.add_argument(
+        "--allow-cuda",
+        action="store_true",
+        help="Allow CUDA even on platforms where bench would auto-force CPU for stability.",
+    )
     mask_group = parser.add_mutually_exclusive_group()
     mask_group.add_argument("--masked", "--masked-only", dest="masked_only", action="store_true", help="Report masked metrics only (tools).")
     mask_group.add_argument("--unmasked", "--unmasked-only", dest="unmasked_only", action="store_true", help="Report unmasked metrics only (tools).")
@@ -399,6 +409,8 @@ def _run_suite(
     masked_only: bool,
     unmasked_only: bool,
     eval_max_steps: int,
+    force_cpu: bool,
+    auto_force_cpu_repo: bool,
     report: Dict[str, Any],
     report_path: Path,
 ) -> Dict[str, Any]:
@@ -479,6 +491,8 @@ def _run_suite(
             "run_self_reflection": bool(run_self_reflection),
             "run_stage3c": bool(run_stage3c),
             "run_lifecycle": bool(run_lifecycle),
+            "force_cpu": bool(force_cpu),
+            "auto_force_cpu_repo": bool(auto_force_cpu_repo),
         }
     )
     _save_report(report_path, report)
@@ -495,12 +509,14 @@ def _run_suite(
                     repo_bc_episodes = 0
                     repo_online_bc_coef = 0.10
                     action_mask_dropout_prob = 0.0
+                    run_force_cpu = bool(force_cpu)
                     if str(case.env_type) == "repo":
                         # Gate-1 tuned defaults from local sweep:
                         # online_bc=0.0, bc_eps=32, mask_drop=0.2
                         repo_bc_episodes = 32 if quick else 128
                         repo_online_bc_coef = 0.0
                         action_mask_dropout_prob = 0.20
+                        run_force_cpu = bool(run_force_cpu or auto_force_cpu_repo)
                     res = run_experiment(
                         seed=int(seed),
                         mode=str(mode),
@@ -537,6 +553,7 @@ def _run_suite(
                         run_self_reflection=bool(run_self_reflection),
                         run_stage3c=bool(run_stage3c),
                         run_lifecycle=bool(run_lifecycle),
+                        force_cpu=bool(run_force_cpu),
                         action_mask_dropout_prob=float(action_mask_dropout_prob),
                         repo_online_bc_coef=float(repo_online_bc_coef),
                         repo_bc_pretrain_episodes=int(repo_bc_episodes),
@@ -722,6 +739,13 @@ def main() -> int:
     report_path = Path(args.report or (Path("reports") / f"bench_{args.suite}_{ts}.json"))
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
+    auto_force_cpu_repo = bool(
+        sys.platform.startswith("win") and sys.version_info >= (3, 13) and not bool(args.allow_cuda)
+    )
+    effective_force_cpu = bool(args.force_cpu)
+    if auto_force_cpu_repo and not effective_force_cpu:
+        print("[BENCH] Windows + Python 3.13 detected: forcing CPU for repo cases for stability. Use --allow-cuda to override.")
+
     hang_sec = int(args.hang_dump_sec or 0)
     if hang_sec > 0:
         faulthandler.enable()
@@ -768,6 +792,8 @@ def main() -> int:
                 "masked_only": bool(args.masked_only),
                 "unmasked_only": bool(args.unmasked_only),
                 "eval_max_steps": int(args.max_episode_steps_eval),
+                "force_cpu": bool(effective_force_cpu),
+                "auto_force_cpu_repo": bool(auto_force_cpu_repo),
             },
         },
         "overall": {
@@ -802,6 +828,8 @@ def main() -> int:
                 masked_only=bool(args.masked_only),
                 unmasked_only=bool(args.unmasked_only),
                 eval_max_steps=int(args.max_episode_steps_eval),
+                force_cpu=bool(effective_force_cpu),
+                auto_force_cpu_repo=bool(auto_force_cpu_repo),
                 report=report,
                 report_path=report_path,
             )
