@@ -494,9 +494,13 @@ def _run_suite(
                 try:
                     repo_bc_episodes = 0
                     repo_online_bc_coef = 0.10
+                    action_mask_dropout_prob = 0.0
                     if str(case.env_type) == "repo":
-                        repo_bc_episodes = 16 if quick else 96
-                        repo_online_bc_coef = 0.20 if quick else 0.10
+                        # Gate-1 tuned defaults from local sweep:
+                        # online_bc=0.0, bc_eps=32, mask_drop=0.2
+                        repo_bc_episodes = 32 if quick else 128
+                        repo_online_bc_coef = 0.0
+                        action_mask_dropout_prob = 0.20
                     res = run_experiment(
                         seed=int(seed),
                         mode=str(mode),
@@ -533,6 +537,7 @@ def _run_suite(
                         run_self_reflection=bool(run_self_reflection),
                         run_stage3c=bool(run_stage3c),
                         run_lifecycle=bool(run_lifecycle),
+                        action_mask_dropout_prob=float(action_mask_dropout_prob),
                         repo_online_bc_coef=float(repo_online_bc_coef),
                         repo_bc_pretrain_episodes=int(repo_bc_episodes),
                         repo_bc_pretrain_max_steps=int(eval_max_steps),
