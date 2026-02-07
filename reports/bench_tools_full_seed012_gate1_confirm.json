@@ -1,0 +1,69 @@
+{
+  "schema_version": "0.1",
+  "meta": {
+    "timestamp": 1770468284,
+    "git_commit": "753c73a06f676d9017bf5a6113f5ec8742b64a0d",
+    "seed_list": [
+      0,
+      1,
+      2
+    ],
+    "suite": "tools",
+    "ood": false,
+    "quick": false,
+    "config": {
+      "mode": "stage4",
+      "variants": [
+        "full"
+      ],
+      "use_skills": false,
+      "skill_mode": "handcrafted",
+      "n_latent_skills": 0,
+      "masked_only": false,
+      "unmasked_only": false,
+      "eval_max_steps": 200,
+      "eval_episodes": 20,
+      "lifecycle_eval_episodes": 20,
+      "lifecycle_online_episodes": 50,
+      "self_model_batches": 200,
+      "self_reflection_batches": 200,
+      "stage3c_batches": 50,
+      "stage3c_collect_episodes": 10,
+      "run_self_reflection": true,
+      "run_stage3c": true,
+      "run_lifecycle": true
+    }
+  },
+  "overall": {
+    "agi_score": 0.0,
+    "notes": [
+      "no_suite_scores_available"
+    ],
+    "gates": {
+      "gate0": "pass",
+      "gate1": "na",
+      "gate2": "na"
+    }
+  },
+  "suites": [
+    {
+      "name": "tools",
+      "status": "running",
+      "score": null,
+      "metrics": {
+        "pass_rate_masked": null,
+        "pass_rate_unmasked": null,
+        "mean_steps_to_pass_unmasked": null,
+        "invalid_action_rate": null,
+        "mask_pred_f1": null,
+        "mask_pred_auc": null,
+        "bc_pretrain_used": null,
+        "action_mask_dropout_prob": null,
+        "mean_invalid_mass": null,
+        "ood_gap": null
+      },
+      "per_env": [],
+      "notes": []
+    }
+  ]
+}
