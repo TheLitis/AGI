@@ -108,6 +108,17 @@
           "pass_rate_unmasked": 0.55,
           "steps": 9.181818181818182,
           "invalid_rate": null
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 1.0,
+          "steps": 6.35,
+          "invalid_rate": null
         }
       ],
       "notes": []
