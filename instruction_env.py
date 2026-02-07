@@ -24,6 +24,7 @@ class InstructionEnvConfig:
     view_size: int = 5
     max_steps: int = 50
     step_penalty: float = -0.01
+    progress_reward: float = 0.05
     success_reward: float = 1.0
     wrong_reward: float = -1.0
 
@@ -261,12 +262,23 @@ class InstructionEnv(BaseEnv):
                 moved = True
 
         reward_env = float(self.config.step_penalty)
+        target = str(self.scenario_configs[self.current_scenario_id].get("target", "A")).upper()
+        size = int(self.grid.shape[0])
+        tx, ty = (1, 1) if target == "A" else (size - 2, size - 2)
+        if moved and action in {0, 1, 2, 3}:
+            prev_dist = abs(int(ax) - int(tx)) + abs(int(ay) - int(ty))
+            cur_ax, cur_ay = int(self.agent_pos[0]), int(self.agent_pos[1])
+            cur_dist = abs(cur_ax - int(tx)) + abs(cur_ay - int(ty))
+            if cur_dist < prev_dist:
+                reward_env += float(self.config.progress_reward)
+            elif cur_dist > prev_dist:
+                reward_env -= float(self.config.progress_reward)
+
         reason = ""
         if action == 5:  # TAKE
             ax, ay = self.agent_pos
             cell = int(self.grid[ax, ay])
             if cell in {self.GOAL_A, self.GOAL_B}:
-                target = str(self.scenario_configs[self.current_scenario_id].get("target", "A")).upper()
                 took = "A" if cell == self.GOAL_A else "B"
                 if took == target:
                     reward_env = float(self.config.success_reward)

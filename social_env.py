@@ -24,6 +24,7 @@ class SocialEnvConfig:
     view_size: int = 5
     max_steps: int = 60
     step_penalty: float = -0.01
+    progress_reward: float = 0.05
     success_reward: float = 1.0
     fail_reward: float = -1.0
 
@@ -300,6 +301,7 @@ class SocialEnv(BaseEnv):
         elif action == 3:
             ny += 1
 
+        prev_food_dist = abs(int(ax) - int(self.food_pos[0])) + abs(int(ay) - int(self.food_pos[1]))
         if action in {0, 1, 2, 3}:
             moved = self._move_if_free(self.agent_pos, nx, ny)
 
@@ -307,6 +309,14 @@ class SocialEnv(BaseEnv):
         self._other_policy_step()
 
         reward_env = float(self.config.step_penalty)
+        if moved and self.food_present and action in {0, 1, 2, 3}:
+            cur_ax, cur_ay = int(self.agent_pos[0]), int(self.agent_pos[1])
+            cur_food_dist = abs(cur_ax - int(self.food_pos[0])) + abs(cur_ay - int(self.food_pos[1]))
+            if cur_food_dist < prev_food_dist:
+                reward_env += float(self.config.progress_reward)
+            elif cur_food_dist > prev_food_dist:
+                reward_env -= float(self.config.progress_reward)
+
         reason = ""
         got_food = False
         other_got_food = False

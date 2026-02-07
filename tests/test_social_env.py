@@ -72,3 +72,16 @@ def test_social_env_expert_collects_food_in_compete():
 
     assert done is True
     assert info.get("reason") == "you_got_food"
+
+
+def test_social_env_progress_shaping_sign():
+    cfg = SocialEnvConfig(size=7, view_size=5, max_steps=60, step_penalty=-0.01, progress_reward=0.05, success_reward=1.0, fail_reward=-1.0)
+    env = SocialEnv(config=cfg, env_id=0, env_name="social_shape", seed=3)
+
+    env.reset(scenario_id=1)
+    _, _, _, info_toward = env.step(0)  # UP toward food at (1, size-2)
+    assert info_toward["reward_env"] > cfg.step_penalty
+
+    env.reset(scenario_id=1)
+    _, _, _, info_away = env.step(1)  # DOWN away from food
+    assert info_away["reward_env"] < cfg.step_penalty

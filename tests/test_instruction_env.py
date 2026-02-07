@@ -52,3 +52,16 @@ def test_instruction_env_expert_reaches_correct_goal():
     assert done is True
     assert info.get("reason") == "took_correct_goal"
 
+
+def test_instruction_env_progress_shaping_sign():
+    cfg = InstructionEnvConfig(size=7, view_size=5, max_steps=50, step_penalty=-0.01, progress_reward=0.05, success_reward=1.0, wrong_reward=-1.0)
+    env = InstructionEnv(config=cfg, env_id=0, env_name="instr_shape", seed=2)
+
+    env.reset(scenario_id=0)  # target A at (1,1), start at center
+    _, _, _, info_toward = env.step(0)  # UP (toward target)
+    assert info_toward["reward_env"] > cfg.step_penalty
+
+    env.reset(scenario_id=0)
+    _, _, _, info_away = env.step(1)  # DOWN (away from target)
+    assert info_away["reward_env"] < cfg.step_penalty
+
