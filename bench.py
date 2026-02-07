@@ -96,14 +96,105 @@ def _refresh_overall(report: Dict[str, Any]) -> None:
     if agi_score is None:
         agi_score = 0.0
         notes.append("no_suite_scores_available")
-    report["overall"] = {
-        "agi_score": agi_score,
-        "notes": notes,
-        "gates": {
+
+    def _suite(name: str) -> Optional[Dict[str, Any]]:
+        for s in suites:
+            if isinstance(s, dict) and s.get("name") == name:
+                return s
+        return None
+
+    def _metric(suite_name: str, key: str) -> Optional[float]:
+        s = _suite(suite_name)
+        if not isinstance(s, dict):
+            return None
+        m = s.get("metrics", {})
+        if not isinstance(m, dict):
+            return None
+        v = m.get(key)
+        if isinstance(v, (int, float)) and math.isfinite(float(v)):
+            return float(v)
+        return None
+
+    required = ("core", "tools", "language", "social", "lifelong", "safety")
+    all_required_present = all(_suite(name) is not None for name in required)
+    if not all_required_present:
+        gates = {
             "gate0": "pass" if suites else "fail",
             "gate1": "na",
             "gate2": "na",
-        },
+        }
+    else:
+        statuses = {name: str((_suite(name) or {}).get("status")) for name in required}
+        gate0 = "pass" if all(statuses.get(name) == "ok" for name in required) else "fail"
+        gate1 = "fail"
+        gate2 = "fail"
+        if gate0 == "pass":
+            tools_unmasked = _metric("tools", "pass_rate_unmasked")
+            tools_steps = _metric("tools", "mean_steps_to_pass_unmasked")
+            core_score = _suite("core").get("score") if isinstance(_suite("core"), dict) else None
+            core_score_v = float(core_score) if isinstance(core_score, (int, float)) and math.isfinite(float(core_score)) else None
+            lang_pass = _metric("language", "pass_rate")
+            lang_drop = _metric("language", "causal_drop")
+            soc_success = _metric("social", "success_rate")
+            soc_transfer = _metric("social", "transfer_rate")
+            ll_forget = _metric("lifelong", "forgetting_gap")
+            ll_forward = _metric("lifelong", "forward_transfer")
+
+            gate1_ok = all(
+                x is not None
+                for x in (core_score_v, tools_unmasked, lang_pass, lang_drop, soc_success, soc_transfer, ll_forget, ll_forward)
+            )
+            if gate1_ok:
+                gate1_ok = bool(
+                    core_score_v >= 0.75
+                    and tools_unmasked >= 0.70
+                    and lang_pass >= 0.55
+                    and lang_drop <= 0.15
+                    and soc_success >= 0.55
+                    and soc_transfer >= 0.55
+                    and ll_forget >= -2.0
+                    and ll_forward >= 0.0
+                )
+            gate1 = "pass" if gate1_ok else "fail"
+
+            gate2_ok = all(
+                x is not None
+                for x in (
+                    core_score_v,
+                    tools_unmasked,
+                    tools_steps,
+                    lang_pass,
+                    lang_drop,
+                    soc_success,
+                    soc_transfer,
+                    ll_forget,
+                    ll_forward,
+                )
+            )
+            if gate2_ok:
+                gate2_ok = bool(
+                    core_score_v >= 0.90
+                    and tools_unmasked >= 0.85
+                    and tools_steps <= 10.0
+                    and lang_pass >= 0.70
+                    and lang_drop <= 0.10
+                    and soc_success >= 0.75
+                    and soc_transfer >= 0.70
+                    and ll_forget >= -1.0
+                    and ll_forward >= 0.5
+                )
+            gate2 = "pass" if gate2_ok else "fail"
+
+        gates = {
+            "gate0": gate0,
+            "gate1": gate1,
+            "gate2": gate2,
+        }
+
+    report["overall"] = {
+        "agi_score": agi_score,
+        "notes": notes,
+        "gates": gates,
     }
 
 
