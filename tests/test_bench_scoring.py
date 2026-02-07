@@ -35,3 +35,8 @@ def test_suite_specs_enable_language_social_lifelong():
         assert suite.implemented is True
         assert len(suite.cases) >= 1
 
+
+def test_tools_metrics_template_exposes_repo_bc_runtime_config():
+    tpl = bench._metric_template("tools")
+    assert "repo_online_bc_coef" in tpl
+    assert "repo_bc_pretrain_episodes" in tpl

@@ -236,6 +236,8 @@ SUITE_METRICS_KEYS: Dict[str, List[str]] = {
         "mask_pred_auc",
         "bc_pretrain_used",
         "action_mask_dropout_prob",
+        "repo_online_bc_coef",
+        "repo_bc_pretrain_episodes",
         "mean_invalid_mass",
         "ood_gap",
     ],
@@ -811,14 +813,34 @@ def _run_suite(
         mask_pred_auc = None
         bc_pretrain_used = False
         action_mask_dropout_prob = None
+        repo_online_bc_coef = None
+        repo_bc_pretrain_episodes = None
         invalid_vals: List[float] = []
         invalid_rate_vals: List[float] = []
         mask_f1_vals: List[float] = []
         mask_auc_vals: List[float] = []
-        if run_records:
-            cfg = (run_records[0].get("result") or {}).get("config", {})
-            if isinstance(cfg, dict):
-                action_mask_dropout_prob = cfg.get("action_mask_dropout_prob")
+        cfg_drop_vals: List[float] = []
+        cfg_online_bc_vals: List[float] = []
+        cfg_bc_eps_vals: List[float] = []
+        for record in run_records:
+            case = record.get("case")
+            if getattr(case, "env_type", None) != "repo":
+                continue
+            cfg = (record.get("result") or {}).get("config", {})
+            if not isinstance(cfg, dict):
+                continue
+            v = cfg.get("action_mask_dropout_prob")
+            if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                cfg_drop_vals.append(float(v))
+            v = cfg.get("repo_online_bc_coef")
+            if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                cfg_online_bc_vals.append(float(v))
+            v = cfg.get("repo_bc_pretrain_episodes")
+            if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                cfg_bc_eps_vals.append(float(v))
+        action_mask_dropout_prob = _safe_mean(cfg_drop_vals)
+        repo_online_bc_coef = _safe_mean(cfg_online_bc_vals)
+        repo_bc_pretrain_episodes = _safe_mean(cfg_bc_eps_vals)
         for record in run_records:
             res = record.get("result") or {}
             if not isinstance(res, dict):
@@ -866,6 +888,8 @@ def _run_suite(
                 "mask_pred_auc": mask_pred_auc,
                 "bc_pretrain_used": bool(bc_pretrain_used),
                 "action_mask_dropout_prob": action_mask_dropout_prob,
+                "repo_online_bc_coef": repo_online_bc_coef,
+                "repo_bc_pretrain_episodes": repo_bc_pretrain_episodes,
                 "mean_invalid_mass": mean_invalid_mass,
                 "ood_gap": None,
             }
