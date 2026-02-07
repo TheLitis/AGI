@@ -1,0 +1,68 @@
+{
+  "phase1_top3": [
+    {
+      "online_bc": 0.0,
+      "bc_eps": 0,
+      "mask_drop": 0.0,
+      "seed": 0,
+      "masked_pass": 1.0,
+      "unmasked_pass": 1.0,
+      "unmasked_mean_steps": Infinity,
+      "score": -Infinity
+    },
+    {
+      "online_bc": 0.0,
+      "bc_eps": 0,
+      "mask_drop": 0.2,
+      "seed": 0,
+      "masked_pass": 1.0,
+      "unmasked_pass": 0.3333333333333333,
+      "unmasked_mean_steps": Infinity,
+      "score": -Infinity
+    },
+    {
+      "online_bc": 0.0,
+      "bc_eps": 16,
+      "mask_drop": 0.0,
+      "seed": 0,
+      "masked_pass": 1.0,
+      "unmasked_pass": 0.6666666666666666,
+      "unmasked_mean_steps": Infinity,
+      "score": -Infinity
+    }
+  ],
+  "phase2": [
+    {
+      "online_bc": 0.0,
+      "bc_eps": 16,
+      "mask_drop": 0.0,
+      "avg_masked_pass": 1.0,
+      "avg_unmasked_pass": 0.4444444444444444,
+      "avg_unmasked_steps": null
+    },
+    {
+      "online_bc": 0.0,
+      "bc_eps": 0,
+      "mask_drop": 0.0,
+      "avg_masked_pass": 1.0,
+      "avg_unmasked_pass": 0.2222222222222222,
+      "avg_unmasked_steps": null
+    },
+    {
+      "online_bc": 0.0,
+      "bc_eps": 0,
+      "mask_drop": 0.2,
+      "avg_masked_pass": 1.0,
+      "avg_unmasked_pass": 0.2222222222222222,
+      "avg_unmasked_steps": null
+    }
+  ],
+  "best": {
+    "online_bc": 0.0,
+    "bc_eps": 16,
+    "mask_drop": 0.0,
+    "avg_masked_pass": 1.0,
+    "avg_unmasked_pass": 0.4444444444444444,
+    "avg_unmasked_steps": null
+  }
+}
