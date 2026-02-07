@@ -341,6 +341,42 @@ def _bounded_return_score(value: Optional[float], *, center: float = 0.0, scale:
     return float(1.0 / (1.0 + math.exp(-(v - float(center)) / denom)))
 
 
+def _as_unit_rate(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return float(max(0.0, min(1.0, float(value))))
+    return None
+
+
+def _language_rates_from_eval(eval_metrics: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Prefer explicit instruction success rates; fallback to bounded returns.
+    """
+    if not isinstance(eval_metrics, dict):
+        return None, None
+    pass_rate = _as_unit_rate(eval_metrics.get("instruction_success_rate"))
+    ood_rate = _as_unit_rate(eval_metrics.get("instruction_test_success_rate"))
+    if pass_rate is None:
+        pass_rate = _bounded_return_score(eval_metrics.get("mean_return"), center=0.0, scale=1.0)
+    if ood_rate is None:
+        ood_rate = _bounded_return_score(eval_metrics.get("test_mean_return"), center=0.0, scale=1.0)
+    return pass_rate, ood_rate
+
+
+def _social_rates_from_eval(eval_metrics: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Prefer explicit social success/transfer rates; fallback to bounded returns.
+    """
+    if not isinstance(eval_metrics, dict):
+        return None, None
+    success = _as_unit_rate(eval_metrics.get("social_success_rate"))
+    transfer = _as_unit_rate(eval_metrics.get("social_test_success_rate"))
+    if success is None:
+        success = _bounded_return_score(eval_metrics.get("mean_return"), center=0.0, scale=1.0)
+    if transfer is None:
+        transfer = _bounded_return_score(eval_metrics.get("test_mean_return"), center=0.0, scale=1.0)
+    return success, transfer
+
+
 def _core_score(
     mean_return: Optional[float],
     test_mean_return: Optional[float],
@@ -609,9 +645,12 @@ def _run_suite(
     planning_horizon = 12
     planner_rollouts = 4
     planning_coef = 0.30
+    eval_policy = "sample"
     lifelong_eps = 50
     stage1_steps = 5000
     stage1_batches = 200
+    stage2_updates = 1
+    stage4_updates = 1
     eval_episodes = 20
     lifecycle_eval_episodes = 20
     lifecycle_online_episodes = 50
@@ -628,10 +667,11 @@ def _run_suite(
         planning_horizon = 6
         planner_rollouts = 2
         planning_coef = 0.25
+        eval_policy = "greedy"
         lifelong_eps = 10
         stage1_steps = 200
         stage1_batches = 10
-        eval_episodes = 3
+        eval_episodes = 5
         lifecycle_eval_episodes = 2
         lifecycle_online_episodes = 2
         self_model_batches = 20
@@ -641,6 +681,31 @@ def _run_suite(
         run_self_reflection = False
         run_stage3c = False
         run_lifecycle = False
+        if suite.name in {"language", "social"}:
+            # Lower variance for sparse binary success metrics in tiny quick runs.
+            eval_episodes = 9
+            n_steps = 160
+            stage2_updates = 2
+            stage4_updates = 2
+        elif suite.name == "tools":
+            # Repo tool-loop is the noisiest quick case; give it a bit more budget.
+            eval_episodes = 9
+            n_steps = 192
+            stage1_steps = 300
+            stage1_batches = 12
+            stage2_updates = 2
+            stage4_updates = 2
+        elif suite.name == "lifelong":
+            # Lifelong metrics are unstable under ultra-short adaptation windows.
+            eval_episodes = 6
+            n_steps = 192
+            stage1_steps = 300
+            stage1_batches = 12
+            lifelong_eps = 20
+            lifecycle_eval_episodes = 4
+            lifecycle_online_episodes = 8
+            stage2_updates = 2
+            stage4_updates = 2
 
     run_records: List[Dict[str, Any]] = []
     any_error = False
@@ -655,6 +720,10 @@ def _run_suite(
             "self_reflection_batches": int(self_reflection_batches),
             "stage3c_batches": int(stage3c_batches),
             "stage3c_collect_episodes": int(stage3c_collect_episodes),
+            "n_steps": int(n_steps),
+            "stage2_updates": int(stage2_updates),
+            "stage4_updates": int(stage4_updates),
+            "eval_policy": str(eval_policy),
             "run_self_reflection": bool(run_self_reflection),
             "run_stage3c": bool(run_stage3c),
             "run_lifecycle": bool(run_lifecycle),
@@ -678,10 +747,15 @@ def _run_suite(
                     action_mask_dropout_prob = 0.0
                     run_force_cpu = bool(force_cpu)
                     run_mode = str(mode)
+                    run_eval_policy = str(eval_policy)
+                    if suite.name in {"language", "social"}:
+                        # These suites have built-in oracles; stronger BC greatly reduces variance.
+                        repo_online_bc_coef = 0.30
+                        repo_bc_episodes = 32 if quick else 96
                     if str(case.env_type) == "repo":
                         # Gate-1 tuned defaults from local sweep:
-                        # online_bc=0.0, bc_eps=32, mask_drop=0.2
-                        repo_bc_episodes = 32 if quick else 128
+                        # online_bc=0.0, mask_drop=0.2; quick uses extra BC episodes for stability.
+                        repo_bc_episodes = 48 if quick else 128
                         repo_online_bc_coef = 0.0
                         action_mask_dropout_prob = 0.20
                         run_force_cpu = bool(run_force_cpu or auto_force_cpu_repo)
@@ -696,8 +770,9 @@ def _run_suite(
                         schedule_mode="iid",
                         episodes_per_phase=int(episodes_per_phase),
                         n_steps=int(n_steps),
-                        stage2_updates=1,
-                        stage4_updates=1,
+                        stage2_updates=int(stage2_updates),
+                        stage4_updates=int(stage4_updates),
+                        eval_policy=run_eval_policy,
                         planning_horizon=int(planning_horizon),
                         planner_mode="rollout",
                         planner_rollouts=int(planner_rollouts),
@@ -923,10 +998,9 @@ def _run_suite(
             if record.get("status") != "ok":
                 continue
             eval_metrics = record.get("eval") or {}
-            p = _bounded_return_score(eval_metrics.get("mean_return"), center=0.0, scale=1.0)
+            p, ood = _language_rates_from_eval(eval_metrics)
             if p is not None:
                 pass_scores.append(float(p))
-            ood = _bounded_return_score(eval_metrics.get("test_mean_return"), center=0.0, scale=1.0)
             if ood is not None:
                 ood_scores.append(float(ood))
         pass_rate = _safe_mean(pass_scores)
@@ -949,10 +1023,9 @@ def _run_suite(
             if record.get("status") != "ok":
                 continue
             eval_metrics = record.get("eval") or {}
-            s = _bounded_return_score(eval_metrics.get("mean_return"), center=0.0, scale=1.0)
+            s, t = _social_rates_from_eval(eval_metrics)
             if s is not None:
                 success_vals.append(float(s))
-            t = _bounded_return_score(eval_metrics.get("test_mean_return"), center=0.0, scale=1.0)
             if t is not None:
                 transfer_vals.append(float(t))
         success_rate = _safe_mean(success_vals)

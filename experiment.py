@@ -164,7 +164,8 @@ def _build_instruction_env_pool(
 ) -> EnvPool:
     from instruction_env import InstructionEnv, InstructionEnvConfig
 
-    cfg = InstructionEnvConfig()
+    # Tuned for stable learnability in short benchmark runs.
+    cfg = InstructionEnvConfig(size=5, view_size=5, max_steps=30)
     train_env = InstructionEnv(config=cfg, env_id=0, env_name="instruction_train", seed=seed + 0)
     test_env = InstructionEnv(config=cfg, env_id=1, env_name="instruction_test", seed=seed + 1)
 
@@ -194,7 +195,8 @@ def _build_social_env_pool(
 ) -> EnvPool:
     from social_env import SocialEnv, SocialEnvConfig
 
-    cfg = SocialEnvConfig()
+    # Keep social tasks challenging but avoid long sparse trajectories in quick mode.
+    cfg = SocialEnvConfig(size=7, view_size=5, max_steps=40)
     train_env = SocialEnv(config=cfg, env_id=0, env_name="social_train", seed=seed + 0)
     test_env = SocialEnv(config=cfg, env_id=1, env_name="social_test", seed=seed + 1)
 
@@ -841,13 +843,25 @@ def run_experiment(
     if mode in {"all", "stage4", "lifelong", "lifelong_train"}:
         planning_coef_eff = planning_coef if use_self_flag else 0.0
         bc_eps = int(max(0, repo_bc_pretrain_episodes))
-        if env_choice == "repo" and bc_eps > 0:
-            stage_metrics["repo_bc_pretrain"] = trainer.train_repo_policy_bc(
-                n_episodes=bc_eps,
-                max_steps=int(max(1, repo_bc_pretrain_max_steps)),
-                planning_coef=0.0,
-                regime_name="repo_bc_pretrain",
-            )
+        if bc_eps > 0:
+            envs_list = getattr(env_pool, "envs", None)
+            has_expert = False
+            if isinstance(envs_list, list):
+                has_expert = any(callable(getattr(e, "get_expert_action", None)) for e in envs_list)
+            if env_choice == "repo" and has_expert:
+                stage_metrics["repo_bc_pretrain"] = trainer.train_repo_policy_bc(
+                    n_episodes=bc_eps,
+                    max_steps=int(max(1, repo_bc_pretrain_max_steps)),
+                    planning_coef=0.0,
+                    regime_name="repo_bc_pretrain",
+                )
+            elif has_expert:
+                stage_metrics["policy_bc_pretrain"] = trainer.train_repo_policy_bc(
+                    n_episodes=bc_eps,
+                    max_steps=int(max(1, repo_bc_pretrain_max_steps)),
+                    planning_coef=0.0,
+                    regime_name=f"{env_choice}_bc_pretrain",
+                )
 
         n_updates = int(max(1, stage4_updates))
         stage4_updates_stats: List[Dict[str, Any]] = []

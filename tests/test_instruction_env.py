@@ -34,3 +34,21 @@ def test_instruction_env_correct_vs_wrong_goal():
     assert info["reason"] == "took_wrong_goal"
     assert info["reward_env"] == cfg.wrong_reward
 
+
+def test_instruction_env_expert_reaches_correct_goal():
+    cfg = InstructionEnvConfig(size=7, view_size=5, max_steps=50, step_penalty=-0.01, success_reward=1.0, wrong_reward=-1.0)
+    env = InstructionEnv(config=cfg, env_id=0, env_name="instr_expert", seed=1)
+    env.reset(scenario_id=1)  # goal B
+
+    done = False
+    info = {}
+    for _ in range(32):
+        action = env.get_expert_action()
+        assert action is not None
+        _, _, done, info = env.step(int(action))
+        if done:
+            break
+
+    assert done is True
+    assert info.get("reason") == "took_correct_goal"
+

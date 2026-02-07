@@ -36,6 +36,30 @@ def test_suite_specs_enable_language_social_lifelong():
         assert len(suite.cases) >= 1
 
 
+def test_language_rates_prefer_explicit_success_metrics():
+    eval_metrics = {
+        "instruction_success_rate": 0.8,
+        "instruction_test_success_rate": 0.6,
+        "mean_return": -10.0,
+        "test_mean_return": -10.0,
+    }
+    p, ood = bench._language_rates_from_eval(eval_metrics)
+    assert p == 0.8
+    assert ood == 0.6
+
+
+def test_social_rates_prefer_explicit_success_metrics():
+    eval_metrics = {
+        "social_success_rate": 0.9,
+        "social_test_success_rate": 0.7,
+        "mean_return": -10.0,
+        "test_mean_return": -10.0,
+    }
+    s, t = bench._social_rates_from_eval(eval_metrics)
+    assert s == 0.9
+    assert t == 0.7
+
+
 def test_tools_metrics_template_exposes_repo_bc_runtime_config():
     tpl = bench._metric_template("tools")
     assert "repo_online_bc_coef" in tpl

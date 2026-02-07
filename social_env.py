@@ -115,6 +115,45 @@ class SocialEnv(BaseEnv):
     def sample_random_action(self) -> int:
         return int(self.rng.randint(0, self.n_actions))
 
+    def get_expert_action(self) -> Optional[int]:
+        """
+        Deterministic oracle for BC/online-BC:
+        move greedily to food, then TAKE.
+        """
+        if self.grid is None:
+            return None
+        if not self.food_present:
+            return 4  # STAY
+
+        ax, ay = int(self.agent_pos[0]), int(self.agent_pos[1])
+        fx, fy = int(self.food_pos[0]), int(self.food_pos[1])
+        if ax == fx and ay == fy:
+            return 5  # TAKE
+
+        candidates: List[int] = []
+        if ax > fx:
+            candidates.append(0)  # UP
+        elif ax < fx:
+            candidates.append(1)  # DOWN
+        if ay > fy:
+            candidates.append(2)  # LEFT
+        elif ay < fy:
+            candidates.append(3)  # RIGHT
+
+        for action in candidates:
+            nx, ny = ax, ay
+            if action == 0:
+                nx -= 1
+            elif action == 1:
+                nx += 1
+            elif action == 2:
+                ny -= 1
+            elif action == 3:
+                ny += 1
+            if int(self.grid[nx, ny]) != self.WALL:
+                return int(action)
+        return 4  # STAY
+
     # --------- env descriptor / spec ---------
     def _compute_env_descriptor(self) -> np.ndarray:
         size = float(int(self.config.size))

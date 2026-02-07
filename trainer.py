@@ -5100,7 +5100,20 @@ class Trainer:
         if eval_policy_norm not in {"sample", "greedy"}:
             eval_policy_norm = "sample"
 
-        mask_supported = hasattr(self.env, "set_action_mask_enabled")
+        def _supports_action_mask(env_obj: Any) -> bool:
+            envs_list = getattr(env_obj, "envs", None)
+            if envs_list is not None:
+                for sub_env in envs_list:
+                    get_mask_fn = getattr(sub_env, "get_action_mask", None)
+                    set_mask_fn = getattr(sub_env, "set_action_mask_enabled", None)
+                    if callable(get_mask_fn) or callable(set_mask_fn):
+                        return True
+                return False
+            get_mask_fn = getattr(env_obj, "get_action_mask", None)
+            set_mask_fn = getattr(env_obj, "set_action_mask_enabled", None)
+            return bool(callable(get_mask_fn) or callable(set_mask_fn))
+
+        mask_supported = _supports_action_mask(self.env)
         prev_mask_enabled: Optional[bool] = None
         if mask_supported and hasattr(self.env, "get_action_mask_enabled"):
             try:
@@ -5133,6 +5146,27 @@ class Trainer:
             repo_pass_flags_test: List[bool] = []
             repo_steps_to_pass_train: List[int] = []
             repo_steps_to_pass_test: List[int] = []
+            instruction_success_flags: List[bool] = []
+            instruction_success_flags_train: List[bool] = []
+            instruction_success_flags_test: List[bool] = []
+            social_success_flags: List[bool] = []
+            social_success_flags_train: List[bool] = []
+            social_success_flags_test: List[bool] = []
+
+            def _episode_success(ep_info: Dict[str, Any]) -> Optional[bool]:
+                if not isinstance(ep_info, dict):
+                    return None
+                if "last_test_passed" in ep_info:
+                    return bool(ep_info.get("last_test_passed"))
+                reason = str(ep_info.get("reason", "")).strip().lower()
+                if reason in {"took_correct_goal", "you_got_food", "food_collected"}:
+                    return True
+                if reason in {"took_wrong_goal", "other_got_food"}:
+                    return False
+                reward_env = ep_info.get("reward_env")
+                if isinstance(reward_env, (int, float)) and math.isfinite(float(reward_env)):
+                    return bool(float(reward_env) > 0.0)
+                return None
 
             for _ in range(n_episodes):
                 obs = self.env.reset()
@@ -5404,6 +5438,28 @@ class Trainer:
                     task_key = scenario_name or env_name
                     per_task_returns.setdefault(task_key, []).append(float(total_r))
 
+                family = str(info.get("env_family", "")).lower() if isinstance(info, dict) else ""
+                if not family:
+                    env_name_l = str(env_name).lower()
+                    if "instruction" in env_name_l:
+                        family = "instruction-basic"
+                    elif "social" in env_name_l:
+                        family = "social-basic"
+                success_flag = _episode_success(info)
+                if success_flag is not None:
+                    if "instruction" in family:
+                        instruction_success_flags.append(bool(success_flag))
+                        if split == "train":
+                            instruction_success_flags_train.append(bool(success_flag))
+                        elif split == "test":
+                            instruction_success_flags_test.append(bool(success_flag))
+                    elif "social" in family:
+                        social_success_flags.append(bool(success_flag))
+                        if split == "train":
+                            social_success_flags_train.append(bool(success_flag))
+                        elif split == "test":
+                            social_success_flags_test.append(bool(success_flag))
+
             mean_ret = float(np.mean(returns)) if returns else float("nan")
             std_ret = float(np.std(returns)) if returns else float("nan")
             mean_len = float(np.mean(lengths)) if lengths else float("nan")
@@ -5504,6 +5560,18 @@ class Trainer:
                 if repo_pass_flags_test:
                     metrics["repo_test_pass_rate"] = float(np.mean(repo_pass_flags_test))
                     metrics["repo_test_steps_to_pass"] = [int(x) for x in repo_steps_to_pass_test]
+            if instruction_success_flags:
+                metrics["instruction_success_rate"] = float(np.mean(instruction_success_flags))
+                if instruction_success_flags_train:
+                    metrics["instruction_train_success_rate"] = float(np.mean(instruction_success_flags_train))
+                if instruction_success_flags_test:
+                    metrics["instruction_test_success_rate"] = float(np.mean(instruction_success_flags_test))
+            if social_success_flags:
+                metrics["social_success_rate"] = float(np.mean(social_success_flags))
+                if social_success_flags_train:
+                    metrics["social_train_success_rate"] = float(np.mean(social_success_flags_train))
+                if social_success_flags_test:
+                    metrics["social_test_success_rate"] = float(np.mean(social_success_flags_test))
             return metrics
 
         # Primary eval: respect/enable the environment's action-mask UI (if present).
@@ -5524,6 +5592,12 @@ class Trainer:
                 "repo_pass_rate",
                 "repo_train_pass_rate",
                 "repo_test_pass_rate",
+                "instruction_success_rate",
+                "instruction_train_success_rate",
+                "instruction_test_success_rate",
+                "social_success_rate",
+                "social_train_success_rate",
+                "social_test_success_rate",
             ):
                 if key in unmasked:
                     results[f"unmasked_{key}"] = unmasked[key]

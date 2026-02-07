@@ -20,7 +20,7 @@ from env import BaseEnv, build_env_descriptor
 
 @dataclass
 class InstructionEnvConfig:
-    size: int = 9
+    size: int = 7
     view_size: int = 5
     max_steps: int = 50
     step_penalty: float = -0.01
@@ -108,6 +108,45 @@ class InstructionEnv(BaseEnv):
 
     def sample_random_action(self) -> int:
         return int(self.rng.randint(0, self.n_actions))
+
+    def get_expert_action(self) -> Optional[int]:
+        """
+        Deterministic oracle policy for BC/online-BC.
+        Move toward instructed goal with Manhattan-greedy steps, then TAKE.
+        """
+        if self.grid is None:
+            return None
+        target = str(self.scenario_configs[self.current_scenario_id].get("target", "A")).upper()
+        size = int(self.grid.shape[0])
+        tx, ty = (1, 1) if target == "A" else (size - 2, size - 2)
+        ax, ay = int(self.agent_pos[0]), int(self.agent_pos[1])
+
+        if ax == tx and ay == ty:
+            return 5  # TAKE
+
+        candidates: List[int] = []
+        if ax > tx:
+            candidates.append(0)  # UP
+        elif ax < tx:
+            candidates.append(1)  # DOWN
+        if ay > ty:
+            candidates.append(2)  # LEFT
+        elif ay < ty:
+            candidates.append(3)  # RIGHT
+
+        for action in candidates:
+            nx, ny = ax, ay
+            if action == 0:
+                nx -= 1
+            elif action == 1:
+                nx += 1
+            elif action == 2:
+                ny -= 1
+            elif action == 3:
+                ny += 1
+            if int(self.grid[nx, ny]) != self.WALL:
+                return int(action)
+        return 4  # STAY
 
     # --------- env descriptor / spec ---------
     def _compute_env_descriptor(self) -> np.ndarray:

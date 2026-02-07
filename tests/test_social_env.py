@@ -54,3 +54,21 @@ def test_social_env_you_can_win_race_in_compete():
     assert done is True
     assert info["reason"] == "you_got_food"
     assert info["reward_env"] == cfg.success_reward
+
+
+def test_social_env_expert_collects_food_in_compete():
+    cfg = SocialEnvConfig(size=7, view_size=5, max_steps=60, step_penalty=-0.01, success_reward=1.0, fail_reward=-1.0)
+    env = SocialEnv(config=cfg, env_id=0, env_name="social_expert", seed=1)
+    env.reset(scenario_id=1)  # compete
+
+    done = False
+    info = {}
+    for _ in range(32):
+        action = env.get_expert_action()
+        assert action is not None
+        _, _, done, info = env.step(int(action))
+        if done:
+            break
+
+    assert done is True
+    assert info.get("reason") == "you_got_food"
