@@ -65,3 +65,16 @@ def test_instruction_env_progress_shaping_sign():
     _, _, _, info_away = env.step(1)  # DOWN (away from target)
     assert info_away["reward_env"] < cfg.step_penalty
 
+
+def test_instruction_env_single_goal_mode_spawns_only_target():
+    cfg = InstructionEnvConfig(size=7, view_size=5, max_steps=50, spawn_both_goals=False)
+    env = InstructionEnv(config=cfg, env_id=0, env_name="instr_single_goal", seed=4)
+
+    env.reset(scenario_id=0)  # target A
+    assert int(env.grid[1, 1]) == env.GOAL_A
+    assert int(env.grid[cfg.size - 2, cfg.size - 2]) != env.GOAL_B
+
+    env.reset(scenario_id=1)  # target B
+    assert int(env.grid[cfg.size - 2, cfg.size - 2]) == env.GOAL_B
+    assert int(env.grid[1, 1]) != env.GOAL_A
+

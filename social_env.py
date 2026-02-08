@@ -27,6 +27,7 @@ class SocialEnvConfig:
     progress_reward: float = 0.05
     success_reward: float = 1.0
     fail_reward: float = -1.0
+    compete_probability: float = 0.5
 
 
 class SocialEnv(BaseEnv):
@@ -190,7 +191,11 @@ class SocialEnv(BaseEnv):
 
     # --------- core logic ---------
     def reset(self, scenario_id: Optional[int] = None) -> Dict[str, Any]:
-        sid = int(scenario_id) if scenario_id is not None else int(self.rng.randint(0, self.n_scenarios))
+        if scenario_id is not None:
+            sid = int(scenario_id)
+        else:
+            p_compete = float(max(0.0, min(1.0, float(self.config.compete_probability))))
+            sid = 1 if float(self.rng.rand()) < p_compete else 0
         sid = sid % self.n_scenarios
         self.current_scenario_id = sid
         self.current_scenario_name = str(self.scenario_configs[sid].get("name", f"scenario_{sid}"))
@@ -331,7 +336,7 @@ class SocialEnv(BaseEnv):
                 other_got_food = True
                 self.food_present = False
                 self.grid[fx, fy] = self.EMPTY
-            if action == 5:
+            if action in {4, 5}:
                 ax, ay = self.agent_pos
                 if ax == fx and ay == fy:
                     got_food = True

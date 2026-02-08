@@ -27,6 +27,7 @@ class InstructionEnvConfig:
     progress_reward: float = 0.05
     success_reward: float = 1.0
     wrong_reward: float = -1.0
+    spawn_both_goals: bool = True
 
 
 class InstructionEnv(BaseEnv):
@@ -152,8 +153,8 @@ class InstructionEnv(BaseEnv):
     # --------- env descriptor / spec ---------
     def _compute_env_descriptor(self) -> np.ndarray:
         size = float(int(self.config.size))
-        # Two fixed goals in a bounded map (very low densities).
-        goal_density = float(2.0 / max(1.0, size * size))
+        n_goals = 2.0 if bool(self.config.spawn_both_goals) else 1.0
+        goal_density = float(n_goals / max(1.0, size * size))
         wall_density = float(4.0 * size / max(1.0, size * size))
         return build_env_descriptor(
             env_family=self.env_family,
@@ -198,9 +199,16 @@ class InstructionEnv(BaseEnv):
         self.grid[:, 0] = self.WALL
         self.grid[:, -1] = self.WALL
 
-        # deterministic goal positions (keeps tests stable and learning clean).
-        self.grid[1, 1] = self.GOAL_A
-        self.grid[size - 2, size - 2] = self.GOAL_B
+        # Deterministic goal positions keep tests stable and learning clean.
+        if bool(self.config.spawn_both_goals):
+            self.grid[1, 1] = self.GOAL_A
+            self.grid[size - 2, size - 2] = self.GOAL_B
+        else:
+            target = str(self.scenario_configs[sid].get("target", "A")).upper()
+            if target == "A":
+                self.grid[1, 1] = self.GOAL_A
+            else:
+                self.grid[size - 2, size - 2] = self.GOAL_B
 
         self.agent_pos = [size // 2, size // 2]
         self.steps = 0
@@ -275,7 +283,7 @@ class InstructionEnv(BaseEnv):
                 reward_env -= float(self.config.progress_reward)
 
         reason = ""
-        if action == 5:  # TAKE
+        if action in {4, 5}:  # STAY/TAKE can finalize on a goal tile
             ax, ay = self.agent_pos
             cell = int(self.grid[ax, ay])
             if cell in {self.GOAL_A, self.GOAL_B}:

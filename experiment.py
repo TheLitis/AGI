@@ -165,7 +165,14 @@ def _build_instruction_env_pool(
     from instruction_env import InstructionEnv, InstructionEnvConfig
 
     # Tuned for stable learnability in short benchmark runs.
-    cfg = InstructionEnvConfig(size=5, view_size=5, max_steps=30)
+    cfg = InstructionEnvConfig(
+        size=5,
+        view_size=5,
+        max_steps=30,
+        step_penalty=0.01,
+        progress_reward=0.20,
+        spawn_both_goals=False,
+    )
     train_env = InstructionEnv(config=cfg, env_id=0, env_name="instruction_train", seed=seed + 0)
     test_env = InstructionEnv(config=cfg, env_id=1, env_name="instruction_test", seed=seed + 1)
 
@@ -196,7 +203,7 @@ def _build_social_env_pool(
     from social_env import SocialEnv, SocialEnvConfig
 
     # Keep social tasks challenging but avoid long sparse trajectories in quick mode.
-    cfg = SocialEnvConfig(size=7, view_size=5, max_steps=40)
+    cfg = SocialEnvConfig(size=7, view_size=5, max_steps=40, compete_probability=0.35)
     train_env = SocialEnv(config=cfg, env_id=0, env_name="social_train", seed=seed + 0)
     test_env = SocialEnv(config=cfg, env_id=1, env_name="social_test", seed=seed + 1)
 

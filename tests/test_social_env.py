@@ -85,3 +85,17 @@ def test_social_env_progress_shaping_sign():
     env.reset(scenario_id=1)
     _, _, _, info_away = env.step(1)  # DOWN away from food
     assert info_away["reward_env"] < cfg.step_penalty
+
+
+def test_social_env_compete_probability_extremes():
+    cfg_coop = SocialEnvConfig(size=7, view_size=5, max_steps=20, compete_probability=0.0)
+    env_coop = SocialEnv(config=cfg_coop, env_id=0, env_name="social_prob0", seed=5)
+    for _ in range(5):
+        env_coop.reset()
+        assert env_coop.current_scenario_name == "cooperate"
+
+    cfg_compete = SocialEnvConfig(size=7, view_size=5, max_steps=20, compete_probability=1.0)
+    env_compete = SocialEnv(config=cfg_compete, env_id=1, env_name="social_prob1", seed=6)
+    for _ in range(5):
+        env_compete.reset()
+        assert env_compete.current_scenario_name == "compete"
