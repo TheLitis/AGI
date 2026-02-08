@@ -682,11 +682,11 @@ def _run_suite(
         run_stage3c = False
         run_lifecycle = False
         if suite.name in {"language", "social"}:
-            # Lower variance for sparse binary success metrics in tiny quick runs.
+            # Give sparse success suites more signal in quick mode.
             eval_episodes = 9
-            n_steps = 160
-            stage2_updates = 2
-            stage4_updates = 2
+            n_steps = 192
+            stage2_updates = 3
+            stage4_updates = 4
         elif suite.name == "tools":
             # Repo tool-loop is the noisiest quick case; give it a bit more budget.
             eval_episodes = 9
@@ -748,16 +748,18 @@ def _run_suite(
                     run_force_cpu = bool(force_cpu)
                     run_mode = str(mode)
                     run_eval_policy = str(eval_policy)
+                    run_planning_coef = float(planning_coef)
                     if suite.name in {"language", "social"}:
-                        # These suites have built-in oracles; stronger BC greatly reduces variance.
-                        repo_online_bc_coef = 0.30
-                        repo_bc_episodes = 32 if quick else 96
+                        # Strong imitation + no planner noise is more stable for sparse language/social tasks.
+                        repo_online_bc_coef = 1.00
+                        repo_bc_episodes = 64 if quick else 128
+                        run_planning_coef = 0.0
                     if str(case.env_type) == "repo":
                         # Gate-1 tuned defaults from local sweep:
-                        # online_bc=0.0, mask_drop=0.2; quick uses extra BC episodes for stability.
-                        repo_bc_episodes = 48 if quick else 128
+                        # online_bc=0.0; keep mask dropout disabled to preserve unmasked generalization.
+                        repo_bc_episodes = 64 if quick else 128
                         repo_online_bc_coef = 0.0
-                        action_mask_dropout_prob = 0.20
+                        action_mask_dropout_prob = 0.0
                         run_force_cpu = bool(run_force_cpu or auto_force_cpu_repo)
                     if suite.name == "lifelong":
                         run_mode = "lifelong"
@@ -776,7 +778,7 @@ def _run_suite(
                         planning_horizon=int(planning_horizon),
                         planner_mode="rollout",
                         planner_rollouts=int(planner_rollouts),
-                        planning_coef=float(planning_coef),
+                        planning_coef=float(run_planning_coef),
                         lifelong_episodes_per_chapter=int(lifelong_eps),
                         minigrid_scenarios=case.minigrid_scenarios,
                         computer_scenarios=case.computer_scenarios,
