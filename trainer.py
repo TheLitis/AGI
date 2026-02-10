@@ -298,6 +298,10 @@ class Trainer:
         except Exception:
             self.action_mask_dropout_prob = 0.0
         self.action_mask_prediction_coef = max(0.0, float(action_mask_prediction_coef or 0.0))
+        # Conservative unmasked bias from predicted action-mask logits:
+        # only high-confidence predictions are used, with limited strength.
+        self.unmasked_mask_bias_mix = 1.00
+        self.unmasked_mask_confidence_threshold = 0.90
         self.repo_online_bc_coef = max(0.0, float(repo_online_bc_coef or 0.0))
         self._trait_safety_ctx: Dict[str, Dict[str, Any]] = {}
 
@@ -501,14 +505,29 @@ class Trainer:
         mask_logits: Optional[torch.Tensor],
         *,
         min_prob: float = 1.0e-3,
+        mix: float = 1.0,
+        confidence_threshold: Optional[float] = None,
     ) -> torch.Tensor:
         """
         Softly bias logits by predicted validity probabilities.
+        `mix` controls strength in [0, 1]; 1.0 is full multiplicative prior.
+        When `confidence_threshold` is set, only confident predictions are used.
         """
         if mask_logits is None:
             return logits
+        mix = max(0.0, min(1.0, float(mix)))
+        if mix <= 0.0:
+            return logits
         probs = torch.sigmoid(mask_logits).clamp(min=min_prob, max=1.0)
-        return logits + torch.log(probs)
+        if confidence_threshold is not None:
+            thr = max(0.5, min(1.0, float(confidence_threshold)))
+            conf = torch.maximum(probs, 1.0 - probs)
+            confident = conf >= thr
+            if not bool(torch.any(confident).item()):
+                return logits
+            probs = torch.where(confident, probs, torch.ones_like(probs))
+        blended_probs = ((1.0 - mix) + mix * probs).clamp(min=min_prob, max=1.0)
+        return logits + torch.log(blended_probs)
 
     def _compose_policy_logits_with_masks(
         self,
@@ -520,8 +539,7 @@ class Trainer:
     ) -> torch.Tensor:
         """
         Compose final policy logits using optional hard action mask and/or learned
-        mask predictor. Learned mask bias is allowed even when oracle mask is absent
-        (e.g. unmasked eval) to measure mask internalization.
+        mask predictor.
         """
         has_invalid = bool(mask is not None and bool(torch.any(~mask).item()))
         if apply_hard_mask and has_invalid:
@@ -530,7 +548,18 @@ class Trainer:
             mask_logits_pred is not None
             and float(getattr(self, "action_mask_prediction_coef", 0.0) or 0.0) > 0.0
         ):
-            return self._apply_predicted_mask_bias(logits, mask_logits_pred)
+            if has_invalid:
+                # Oracle mask has invalid actions: use full prior from predicted mask logits.
+                return self._apply_predicted_mask_bias(logits, mask_logits_pred, mix=1.0)
+            # Unmasked mode: apply a conservative, confidence-gated prior only.
+            unmasked_mix = float(getattr(self, "unmasked_mask_bias_mix", 0.0) or 0.0)
+            conf_thr = float(getattr(self, "unmasked_mask_confidence_threshold", 1.0) or 1.0)
+            return self._apply_predicted_mask_bias(
+                logits,
+                mask_logits_pred,
+                mix=unmasked_mix,
+                confidence_threshold=conf_thr,
+            )
         return logits
 
     def _get_active_env_instance(self) -> Any:
