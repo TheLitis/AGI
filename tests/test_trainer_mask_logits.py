@@ -7,7 +7,10 @@ def _trainer_with_mask_coef(coef: float) -> Trainer:
     t = Trainer.__new__(Trainer)
     t.action_mask_prediction_coef = float(coef)
     t.unmasked_mask_bias_mix = 0.2
-    t.unmasked_mask_confidence_threshold = 0.9
+    t.unmasked_mask_confidence_threshold = 0.85
+    t.unmasked_mask_confidence_threshold_high = 0.90
+    t.unmasked_mask_auc_quality_threshold = 0.84
+    t.mask_pred_auc_ema = float("nan")
     return t
 
 
@@ -85,3 +88,31 @@ def test_compose_policy_logits_ignores_predicted_bias_when_disabled():
         apply_hard_mask=True,
     )
     assert torch.allclose(out, logits)
+
+
+def test_compose_policy_logits_uses_adaptive_unmasked_confidence_threshold_from_auc():
+    trainer = _trainer_with_mask_coef(0.1)
+    trainer.unmasked_mask_bias_mix = 1.0
+    logits = torch.tensor([[0.0, 0.0]], dtype=torch.float32)
+    # p~=0.88/0.12: above low threshold (0.85), below high threshold (0.90).
+    mask_logits_pred = torch.tensor([[2.0, -2.0]], dtype=torch.float32)
+
+    # High-quality predictor -> high threshold (0.90) -> no bias at this confidence.
+    trainer.mask_pred_auc_ema = 0.90
+    out_high_quality = trainer._compose_policy_logits_with_masks(
+        logits,
+        mask=None,
+        mask_logits_pred=mask_logits_pred,
+        apply_hard_mask=True,
+    )
+    assert torch.allclose(out_high_quality, logits)
+
+    # Lower-quality predictor -> low threshold (0.85) -> bias is applied.
+    trainer.mask_pred_auc_ema = 0.70
+    out_low_quality = trainer._compose_policy_logits_with_masks(
+        logits,
+        mask=None,
+        mask_logits_pred=mask_logits_pred,
+        apply_hard_mask=True,
+    )
+    assert out_low_quality[0, 0] > out_low_quality[0, 1]

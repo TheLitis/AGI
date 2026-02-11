@@ -300,8 +300,15 @@ class Trainer:
         self.action_mask_prediction_coef = max(0.0, float(action_mask_prediction_coef or 0.0))
         # Conservative unmasked bias from predicted action-mask logits:
         # only high-confidence predictions are used, with limited strength.
+        # We adapt confidence threshold from mask-predictor quality:
+        # lower threshold for weak predictor (to recover recall), higher for strong
+        # predictor (to reduce overconfident false constraints).
         self.unmasked_mask_bias_mix = 1.00
-        self.unmasked_mask_confidence_threshold = 0.90
+        self.unmasked_mask_confidence_threshold = 0.85
+        self.unmasked_mask_confidence_threshold_high = 0.90
+        self.unmasked_mask_auc_quality_threshold = 0.84
+        self.mask_pred_auc_ema = float("nan")
+        self.mask_pred_auc_ema_decay = 0.95
         self.repo_online_bc_coef = max(0.0, float(repo_online_bc_coef or 0.0))
         self._trait_safety_ctx: Dict[str, Dict[str, Any]] = {}
 
@@ -529,6 +536,18 @@ class Trainer:
         blended_probs = ((1.0 - mix) + mix * probs).clamp(min=min_prob, max=1.0)
         return logits + torch.log(blended_probs)
 
+    def _effective_unmasked_mask_confidence_threshold(self) -> float:
+        low = float(getattr(self, "unmasked_mask_confidence_threshold", 0.90) or 0.90)
+        high = float(getattr(self, "unmasked_mask_confidence_threshold_high", low) or low)
+        quality_thr = float(getattr(self, "unmasked_mask_auc_quality_threshold", 0.84) or 0.84)
+        try:
+            auc = float(getattr(self, "mask_pred_auc_ema", float("nan")))
+        except Exception:
+            auc = float("nan")
+        if math.isfinite(auc) and auc < quality_thr:
+            return max(0.5, min(1.0, low))
+        return max(0.5, min(1.0, high))
+
     def _compose_policy_logits_with_masks(
         self,
         logits: torch.Tensor,
@@ -553,7 +572,7 @@ class Trainer:
                 return self._apply_predicted_mask_bias(logits, mask_logits_pred, mix=1.0)
             # Unmasked mode: apply a conservative, confidence-gated prior only.
             unmasked_mix = float(getattr(self, "unmasked_mask_bias_mix", 0.0) or 0.0)
-            conf_thr = float(getattr(self, "unmasked_mask_confidence_threshold", 1.0) or 1.0)
+            conf_thr = self._effective_unmasked_mask_confidence_threshold()
             return self._apply_predicted_mask_bias(
                 logits,
                 mask_logits_pred,
@@ -4064,6 +4083,19 @@ class Trainer:
                     mask_pred_auc = float(
                         (sum_pos - (n_pos * (n_pos + 1) / 2.0)) / float(max(1, n_pos * n_neg))
                     )
+                    try:
+                        prev_auc_ema = float(getattr(self, "mask_pred_auc_ema", float("nan")))
+                    except Exception:
+                        prev_auc_ema = float("nan")
+                    try:
+                        decay = float(getattr(self, "mask_pred_auc_ema_decay", 0.95) or 0.95)
+                    except Exception:
+                        decay = 0.95
+                    decay = max(0.0, min(0.999, decay))
+                    if math.isfinite(prev_auc_ema):
+                        self.mask_pred_auc_ema = decay * prev_auc_ema + (1.0 - decay) * mask_pred_auc
+                    else:
+                        self.mask_pred_auc_ema = mask_pred_auc
         online_bc_coef = float(getattr(self, "repo_online_bc_coef", 0.0) or 0.0)
         online_bc_loss = torch.tensor(0.0, device=self.device, dtype=loss.dtype)
         online_bc_samples = 0.0
