@@ -708,6 +708,11 @@ def _run_suite(
             n_steps = 192
             stage2_updates = 3
             stage4_updates = 4
+            if suite.name == "language":
+                # Language conditioning benefits from a slightly longer refinement tail.
+                n_steps = 224
+                stage2_updates = 4
+                stage4_updates = 5
         elif suite.name in {"tools", "tools_open"}:
             # Repo tool suites are the noisiest quick cases; give them more budget.
             eval_episodes = 9
@@ -773,6 +778,9 @@ def _run_suite(
                     repo_bc_episodes = 0
                     repo_online_bc_coef = 0.10
                     action_mask_dropout_prob = 0.0
+                    run_regime_aware_replay = False
+                    run_replay_frac_current = 0.5
+                    run_deterministic_torch = False
                     run_force_cpu = bool(force_cpu)
                     run_mode = str(mode)
                     run_eval_policy = str(eval_policy)
@@ -801,6 +809,9 @@ def _run_suite(
                     if suite.name == "lifelong":
                         run_mode = "lifelong"
                         run_lifecycle = True
+                        run_regime_aware_replay = True
+                        run_replay_frac_current = 0.7
+                        run_deterministic_torch = True
                     res = run_experiment(
                         seed=int(seed),
                         mode=run_mode,
@@ -838,6 +849,9 @@ def _run_suite(
                         run_self_reflection=bool(run_self_reflection),
                         run_stage3c=bool(run_stage3c),
                         run_lifecycle=bool(run_lifecycle),
+                        regime_aware_replay=bool(run_regime_aware_replay),
+                        replay_frac_current=float(run_replay_frac_current),
+                        deterministic_torch=bool(run_deterministic_torch),
                         force_cpu=bool(run_force_cpu),
                         action_mask_dropout_prob=float(action_mask_dropout_prob),
                         repo_online_bc_coef=float(repo_online_bc_coef),
