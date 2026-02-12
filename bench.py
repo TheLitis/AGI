@@ -472,7 +472,11 @@ def _build_suite_specs(
     repo_default = ["train:proc_mixed_loop", "test:proc_mixed_loop"]
     if ood:
         repo_default = ["train:proc_mixed_loop", "test:proc_mixed_ood_loop"]
+    repo_open_default = ["train:proc_mixed_open", "test:proc_mixed_open"]
+    if ood:
+        repo_open_default = ["train:proc_mixed_open", "test:proc_mixed_ood_open"]
     repo_scenarios = repo_override or repo_default
+    repo_open_scenarios = repo_override or repo_open_default
 
     specs = {
         "core": SuiteSpec(
@@ -495,9 +499,11 @@ def _build_suite_specs(
         ),
         "tools_open": SuiteSpec(
             name="tools_open",
-            cases=[],
-            implemented=False,
-            description="Placeholder for open-action tool tasks.",
+            cases=[
+                BenchCase(name="repo_open_toolloop", env_type="repo", repo_scenarios=repo_open_scenarios),
+            ],
+            implemented=True,
+            description="RepoToolEnv open-action procedural loop.",
         ),
         "language": SuiteSpec(
             name="language",
@@ -968,6 +974,48 @@ def _run_suite(
                 "repo_online_bc_coef": repo_online_bc_coef,
                 "repo_bc_pretrain_episodes": repo_bc_pretrain_episodes,
                 "mean_invalid_mass": mean_invalid_mass,
+                "ood_gap": None,
+            }
+        )
+        score = _tools_score(pass_rate_unmasked, invalid_action_rate, mean_steps_unmasked)
+    elif suite.name == "tools_open":
+        unmasked_vals: List[float] = []
+        steps_vals: List[int] = []
+        invalid_rate_vals: List[float] = []
+        for record in run_records:
+            case = record.get("case")
+            if getattr(case, "env_type", None) != "repo" or record.get("status") != "ok":
+                continue
+            eval_metrics = record.get("eval")
+            _pass_masked, pass_unmasked, steps_unmasked = _extract_repo_metrics(eval_metrics)
+            if pass_unmasked is not None:
+                unmasked_vals.append(float(pass_unmasked))
+            steps_vals.extend([int(x) for x in steps_unmasked])
+
+            res = record.get("result") or {}
+            if not isinstance(res, dict):
+                continue
+            stage_metrics = res.get("stage_metrics", {})
+            if not isinstance(stage_metrics, dict):
+                continue
+            train_stats = stage_metrics.get("stage4_train_stats", {})
+            if not isinstance(train_stats, dict):
+                continue
+            ir = train_stats.get("invalid_action_rate")
+            if isinstance(ir, (int, float)) and math.isfinite(float(ir)):
+                invalid_rate_vals.append(float(ir))
+
+        pass_rate_unmasked = _safe_mean(unmasked_vals)
+        mean_steps_unmasked = _safe_mean([float(x) for x in steps_vals])
+        invalid_action_rate = _safe_mean(invalid_rate_vals)
+        if masked_only:
+            notes.append("masked_only ignored for tools_open: suite reports unmasked-only metrics")
+
+        metrics.update(
+            {
+                "pass_rate_unmasked": pass_rate_unmasked,
+                "mean_steps_to_pass_unmasked": mean_steps_unmasked,
+                "invalid_action_rate": invalid_action_rate,
                 "ood_gap": None,
             }
         )

@@ -36,6 +36,20 @@ def test_suite_specs_enable_language_social_lifelong():
         assert len(suite.cases) >= 1
 
 
+def test_suite_specs_enable_tools_open_repo_case():
+    specs = bench._build_suite_specs(
+        minigrid_override=None,
+        computer_override=None,
+        repo_override=None,
+        ood=False,
+    )
+    suite = specs["tools_open"]
+    assert suite.implemented is True
+    assert len(suite.cases) == 1
+    assert suite.cases[0].env_type == "repo"
+    assert suite.cases[0].repo_scenarios == ["train:proc_mixed_open", "test:proc_mixed_open"]
+
+
 def test_language_rates_prefer_explicit_success_metrics():
     eval_metrics = {
         "instruction_success_rate": 0.8,
