@@ -883,6 +883,16 @@ class RepoToolEnv(BaseEnv):
         tagset = {str(t).lower() for t in tags}
         return bool(tagset.intersection({"loop", "toolloop", "open"}))
 
+    def _is_open_task(self, task: Optional[RepoTask] = None) -> bool:
+        task_obj = task or self.current_task
+        if task_obj is None:
+            return False
+        if not _is_procedural_task_name(getattr(task_obj, "name", "")):
+            return False
+        _cat, tags = _procedural_spec(getattr(task_obj, "name", ""))
+        tagset = {str(t).lower() for t in tags}
+        return "open" in tagset
+
     def _refresh_toolloop_candidates(self) -> None:
         """
         Generate a fresh candidate patch menu based on the current failure focus.
@@ -2009,6 +2019,9 @@ class RepoToolEnv(BaseEnv):
         if not bool(getattr(cfg, "toolloop_action_mask", False)):
             return mask
         if not bool(getattr(self, "action_mask_enabled", True)):
+            return mask
+        if self._is_open_task(self.current_task):
+            # Open-tag scenarios intentionally keep the full action space visible.
             return mask
         if not self._is_toolloop_task(self.current_task):
             return mask

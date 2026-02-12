@@ -767,6 +767,10 @@ def _run_suite(
                         repo_online_bc_coef = 0.0
                         action_mask_dropout_prob = 0.0
                         run_force_cpu = bool(run_force_cpu or auto_force_cpu_repo)
+                        if suite.name == "tools_open":
+                            # Open-action procedural tasks are harder: keep a small
+                            # online expert anchor to stabilize policy updates.
+                            repo_online_bc_coef = 0.10
                     if suite.name == "lifelong":
                         run_mode = "lifelong"
                         run_lifecycle = True
