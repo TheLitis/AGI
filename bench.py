@@ -708,14 +708,17 @@ def _run_suite(
             n_steps = 192
             stage2_updates = 3
             stage4_updates = 4
-        elif suite.name == "tools":
-            # Repo tool-loop is the noisiest quick case; give it a bit more budget.
+        elif suite.name in {"tools", "tools_open"}:
+            # Repo tool suites are the noisiest quick cases; give them more budget.
             eval_episodes = 9
             n_steps = 192
             stage1_steps = 300
             stage1_batches = 12
             stage2_updates = 2
             stage4_updates = 2
+            if suite.name == "tools_open":
+                # Open-action tasks need a bit more policy refinement.
+                stage4_updates = 3
         elif suite.name == "lifelong":
             # Lifelong metrics are unstable under ultra-short adaptation windows.
             eval_episodes = 6
@@ -727,6 +730,10 @@ def _run_suite(
             lifecycle_online_episodes = 8
             stage2_updates = 2
             stage4_updates = 2
+
+    if suite.name == "tools_open":
+        # Open-action benchmark is stochastic by design; evaluate with sampling.
+        eval_policy = "sample"
 
     run_records: List[Dict[str, Any]] = []
     any_error = False
@@ -776,16 +783,21 @@ def _run_suite(
                         repo_bc_episodes = 64 if quick else 128
                         run_planning_coef = 0.0
                     if str(case.env_type) == "repo":
-                        # Gate-1 tuned defaults from local sweep:
-                        # online_bc=0.0; keep mask dropout disabled to preserve unmasked generalization.
+                        # Repo defaults are tuned per suite below.
                         repo_bc_episodes = 64 if quick else 128
                         repo_online_bc_coef = 0.0
                         action_mask_dropout_prob = 0.0
                         run_force_cpu = bool(run_force_cpu or auto_force_cpu_repo)
-                        if suite.name == "tools_open":
-                            # Open-action procedural tasks are harder: keep a small
-                            # online expert anchor to stabilize policy updates.
-                            repo_online_bc_coef = 0.10
+                        if suite.name == "tools":
+                            # Gate-1 sweep winner: stronger unmasked transfer.
+                            repo_bc_episodes = 32 if quick else 64
+                            action_mask_dropout_prob = 0.2
+                        elif suite.name == "tools_open":
+                            # Open-action tasks are harder than masked tool-loop:
+                            # keep a stronger online BC anchor and reduce planner bias.
+                            repo_bc_episodes = 96 if quick else 160
+                            repo_online_bc_coef = 0.50
+                            run_planning_coef = 0.0
                     if suite.name == "lifelong":
                         run_mode = "lifelong"
                         run_lifecycle = True
