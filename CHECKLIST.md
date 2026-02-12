@@ -1,30 +1,38 @@
-# MiniGrid run checklist
+﻿# Execution Checklist (Roadmap v2)
 
-- [ ] Install deps: `pip install -r requirements.txt` (includes gymnasium + minigrid).
-- [ ] Quick debug (toy): `python run_all.py --mode stage4 --agent-variant full --seed 0`.
-- [ ] Quick bench battery: `python bench.py --quick`.
-- [ ] MiniGrid stage4 + lifecycle: `python run_all.py --mode stage4 --agent-variant full --env-type minigrid --minigrid-scenarios "minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing" --seed 0`.
-- [ ] Instruction env (language conditioning): `python run_all.py --mode stage4 --agent-variant full --env-type instruction --seed 0`.
-- [ ] Social env (multi-agent): `python run_all.py --mode stage4 --agent-variant full --env-type social --seed 0`.
-- [ ] MiniGrid sweep: `python run_sweep.py --env-type minigrid --minigrid-scenarios "minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing"` (outputs `*_minigrid.json`), then `python analyze_sweep.py --sweep-path sweep_results/stage4_lifecycle_sweep_minigrid.json`.
-- [ ] Mixed GridWorld + MiniGrid: `python run_all.py --mode stage4 --env-type mixed --minigrid-scenarios "minigrid-empty,minigrid-doorkey"`.
-- [ ] Mixed (+ Computer): `python run_all.py --mode stage4 --env-type mixed --minigrid-scenarios "minigrid-empty,minigrid-doorkey" --computer-scenarios "simple_project,refactor_project"`.
-- [ ] Mixed (+ RepoTool): `python run_all.py --mode stage4 --env-type mixed --repo-scenarios "train:calc_add,test:calc_div"`.
-- [ ] RepoToolEnv stage4 (real tool-loop): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:calc_add,test:calc_div" --seed 0`.
-- [ ] RepoToolEnv stage4 (multi-task + OOD-ish): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:calc_add,train:calc_pow,train:string_reverse,train:list_sum,test:calc_div,test:calc_bundle" --seed 0`.
-- [ ] RepoToolEnv stage4 (procedural, less hand-crafted): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_arith,test:proc_arith" --seed 0`.
-- [ ] RepoToolEnv stage4 (procedural, OOD split): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_arith,test:proc_arith_ood" --seed 0`.
-- [ ] RepoToolEnv stage4 (procedural, multi-file): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_bundle,test:proc_bundle" --seed 0`.
-- [ ] RepoToolEnv stage4 (tool-loop candidates, single-file): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_arith_loop,test:proc_arith_loop" --seed 0`.
-- [ ] RepoToolEnv stage4 (tool-loop candidates, multi-file): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_bundle_loop,test:proc_bundle_loop" --seed 0`.
-- [ ] RepoToolEnv stage4 (procedural, refactor multi-file): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_refactor,test:proc_refactor" --seed 0`.
-- [ ] RepoToolEnv stage4 (procedural, regression): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_regression,test:proc_regression" --seed 0`.
-- [ ] RepoToolEnv stage4 (stronger training, greedy eval): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_bundle_loop,test:proc_bundle_loop" --seed 0 --rl-steps 4096 --stage2-updates 8 --stage4-updates 8 --eval-policy greedy --invalid-action-coef 0.30 --action-mask-dropout 0.20`.
-- [ ] RepoToolEnv stage4 (tool-loop candidates, mixed): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_mixed_loop,test:proc_mixed_loop" --seed 0 --rl-steps 4096 --stage2-updates 8 --stage4-updates 8 --eval-policy greedy --invalid-action-coef 0.30 --action-mask-dropout 0.20`.
-- [ ] RepoToolEnv stage4 (tool-loop candidates, mixed OOD split): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_mixed_loop,test:proc_mixed_ood_loop" --seed 0 --rl-steps 4096 --stage2-updates 8 --stage4-updates 8 --eval-policy greedy --invalid-action-coef 0.30 --action-mask-dropout 0.20`.
-- [ ] If `Eval[unmasked]` still lags: try `--invalid-action-coef 1.00` and/or `--stage4-updates 16` (keep `--eval-policy greedy`).
-- [ ] When debugging B1: watch `[A2C] ... mean_invalid_mass=...` — it should fall well below ~0.66 (uniform over 2/6 valid actions) if интернализация работает.
-- [ ] RepoToolEnv stage4 (tool-loop candidates, curriculum mix + OOD): `python run_all.py --mode stage4 --env-type repo --repo-scenarios "train:proc_mixed_loop,train:proc_bundle_loop,train:proc_refactor_loop,train:proc_regression_loop,test:proc_mixed_ood_loop,test:proc_bundle_ood_loop,test:proc_refactor_ood_loop,test:proc_regression_ood_loop" --seed 0 --rl-steps 4096 --stage2-updates 8 --stage4-updates 8 --eval-policy greedy --invalid-action-coef 0.10 --action-mask-dropout 0.20`.
-- [ ] RepoTool sweep: `python run_sweep.py --env-type repo --repo-scenarios "train:calc_add,test:calc_div"` (outputs `*_repo.json`), then `python analyze_sweep.py --sweep-path sweep_results/stage4_lifecycle_sweep_repo.json`.
-- [ ] Lifelong on MiniGrid: `python run_all.py --mode lifelong --env-type minigrid --seed 0` (adjust episodes if needed).
-- [ ] Enable regime-aware replay when debugging forgetting: add `--regime-aware-replay`.
+## 0) Environment
+- [ ] Install deps: `pip install -r requirements.txt`
+- [ ] Verify bench tests: `python -m pytest tests/test_bench_gates.py tests/test_agi_bench_report.py tests/test_bench_scoring.py -q`
+
+## 1) Smoke (fast)
+- [ ] Full quick smoke: `python bench.py --suite quick --seeds 0 --report reports/bench_quick_smoke_seed0.json`
+- [ ] AGI quick smoke: `python bench.py --suite agi_v1 --quick --seeds 0 --report reports/agi_v1.quick.smoke.seed0.json`
+
+## 2) Gate2 Candidate Runs
+- [ ] Run 1: `python bench.py --suite agi_v1 --quick --seeds 0,1,2 --report reports/agi_v1.quick.gate2.seed012.run1.json`
+- [ ] Run 2: `python bench.py --suite agi_v1 --quick --seeds 0,1,2 --report reports/agi_v1.quick.gate2.seed012.run2.json`
+- [ ] Confirm both reports show `overall.gates.gate2 == pass`
+
+## 3) Gate3 Candidate Runs (robustness)
+- [ ] 5-seed full: `python bench.py --suite agi_v1 --seeds 0,1,2,3,4 --report reports/agi_v1.full.gate3.seed01234.json`
+- [ ] 5-seed OOD: `python bench.py --suite agi_v1 --ood --seeds 0,1,2,3,4 --report reports/agi_v1.full.ood.seed01234.json`
+- [ ] Confirm `overall.gates.gate3 == pass` and CI half-width constraints per suite
+
+## 4) Regression Discipline
+- [ ] Run targeted suites before/after risky changes:
+  - core: `python bench.py --suite core --quick --seeds 0,1,2 --report reports/bench_core_quick_seed012.regression.json`
+  - tools: `python bench.py --suite tools --quick --seeds 0,1,2 --report reports/bench_tools_quick_seed012.regression.json`
+  - language: `python bench.py --suite language --quick --seeds 0,1,2 --report reports/bench_language_quick_seed012.regression.json`
+- [ ] Keep previous baseline report for diff-based review
+
+## 5) OOD Pack
+- [ ] core OOD: `python bench.py --suite core --ood --seeds 0,1,2 --report reports/bench_core_ood_seed012.json`
+- [ ] tools OOD: `python bench.py --suite tools --ood --seeds 0,1,2 --report reports/bench_tools_ood_seed012.json`
+- [ ] language OOD: `python bench.py --suite language --ood --seeds 0,1,2 --report reports/bench_language_ood_seed012.json`
+- [ ] social OOD: `python bench.py --suite social --ood --seeds 0,1,2 --report reports/bench_social_ood_seed012.json`
+
+## 6) Acceptance Snapshot
+- [ ] Gate2 stable pass (two repeated runs)
+- [ ] Gate3 stable pass (5 seeds + OOD)
+- [ ] Capability vector populated in report (`overall.capabilities`)
+- [ ] Confidence available and >= threshold for Gate4 candidate

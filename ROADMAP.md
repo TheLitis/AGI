@@ -1,96 +1,28 @@
-# ROADMAP: от текущего прототипа к «более реальному» AGI
+﻿# ROADMAP (Synced)
 
-Обновлено: 2025-12-28 (исправлен баг A2C: дифференцируемые logprob/value/invalid_mass теряли autograd при записи в preallocated буферы; теперь A2C + “интернализация маски” реально обучаются. RepoToolEnv tool-loop стабилизирован; есть метрики masked/unmasked и механика интернализации).
+Updated: 2026-02-12
 
-## Gates (Definition of Done checkpoints)
+Source of truth: `ROADMAP_v2.md`.
 
-- Gate 0: AGI-Bench Suite + единый JSON-репорт + AGI Score (suites/core/tools/…).
-- Gate 1: B1 mask_pred + BC expert для RepoToolEnv, закрытие gap masked/unmasked.
-- Gate 2: B2 open-actions + proc_*_open в RepoToolEnv.
+## Current Stage
+- Gate status target track: `Gate2 -> Gate3 -> Gate4`.
+- Baseline reference: `reports/agi_v1.quick.post_lifelong_replay05.seed0.json`.
+- Known baseline state: `gate0=pass`, `gate1=pass`, `gate2=fail`.
 
-Ниже — честная декомпозиция «что уже есть» и «чего не хватает» относительно 8 “технических гор” из `AGENTS.md`, плюс приоритетный план работ, который можно делать итеративно в этом репозитории.
+## What Is Already Implemented
+- Report schema upgraded to `0.2` in `bench.py`.
+- New report fields:
+  - `meta.run_manifest`
+  - `suites[].ci`
+  - `overall.capabilities`
+  - `overall.confidence`
+  - explicit `gate3`, `gate4`
+- Bench tests updated for new gate and schema behavior.
 
-## Где проект сейчас (кратко)
+## Immediate Next Milestones
+1. Close Gate2 robustly on seeds `0,1,2` with repeated runs.
+2. Add OOD + 5-seed stability discipline to close Gate3.
+3. Expand suites/metrics to complete 8-mountain matrix and Gate4 policy checks.
 
-У тебя уже собран хороший прототип “agent loop”:
-- **Единый агент** (`agent.py`, `models.py`): Perception → WorldModel → SelfModel → Workspace → Policy/Value + traits + простая память.
-- **Мультисреды** (`env.py`, `minigrid_env.py`, `tool_env.py`, `computer_env.py`, `repo_tool_env.py`): общий контракт наблюдений (patch+energy+ids+env_desc) и общий action-space (=6).
-- **Планирование** (`trainer.py`): rollout-планировщик в латентном пространстве + safety-penalty; есть режим планирования по скиллам.
-- **Иерархия/скиллы** (`skills.py`): hand-crafted скиллы + заготовка под латентные.
-- **Lifelong/режимы** (`trainer.py`, `regime_generator.py`, `memory.py`): режимы, метрики забывания, regime-aware replay.
-- **Туллуп (уже “работает”)**: `RepoToolEnv` запускает реальный `pytest` в песочнице; для `proc_*_loop` есть action-mask (UI “недоступных действий”), а в `trainer.evaluate()` теперь считаем **две метрики**: `masked` (компетентность в реалистичном UI) и `unmasked` (интернализация/робастность без подсказок). В A2C добавлен KL-барьер на маску `-log(valid_mass)` (в логах остаётся `mean_invalid_mass`), чтобы агент учился избегать запрещённых действий сам.
-
-## Что не хватает до «реального AGI» (по 8 горам)
-
-### 1) Общность по средам/модальностям
-Есть: общий интерфейс сред + env descriptors + (очень лёгкое) текстовое кондиционирование.  
-Не хватает: настоящей мультимодальности (изображения/звук/видео), унифицированного encoder’а под разные модальности, и обучения на больших разнообразных данных.
-
-### 2) Длинный горизонт и иерархпланирование
-Есть: planning horizon ~12, rollout planner, навыки/скиллы.  
-Не хватает: планирования на сотни/тысячи шагов, устойчивого credit assignment, реальной иерархии целей (goal decomposition), поиска (MCTS/beam) в латентном мире + “компилятор” планов в действия.
-
-### 3) Пожизненное обучение без забывания
-Есть: regime-aware replay, lifelong eval/train, разделение “slow/fast params”.  
-Не хватает: долговременной памяти с retrieval, консолидации знаний, автоматического выбора “что обновлять/что замораживать”, и строгой оценки стабильности на большом пуле навыков.
-
-### 4) Язык, абстракции, объяснения
-Есть: hashed-текст как слабое кондиционирование (без NLP-зоопарка).  
-Не хватает: языкового “двигателя” (LLM/transformer) как слоя абстракций, связки языка с world model + памятью + планированием, и механизма объяснений/проверяемых рассуждений.
-
-### 5) Инструменты и сложные воркфлоу
-Есть: `ComputerEnv` (симуляция), `RepoToolEnv` (реальный pytest, tool-loop, процедурные задачи, action-mask + метрики masked/unmasked + “интернализация” через штраф за invalid-action mass).  
-Не хватает: действительно открытого пространства действий (поиск/grep, чтение файлов, локальные правки строк/блоков без заранее заданного меню), устойчивых длинных workflow (план → исполнение → проверка → дебаг → повтор), и “agent state” (журнал гипотез/проверок/прогресса).
-
-### 6) Социальный мир и theory-of-mind
-Есть: “фракции”/traits как заготовка под конфликт/безопасность.  
-Не хватает: многoагентности (другие агенты), моделирования их целей/знаний, протоколов кооперации/конфликта и норм.
-
-### 7) Надёжность/безопасность/alignment
-Есть: safety-penalty в планировщике, ограничения в trait-reflection.  
-Не хватает: систематического OOD/адверсариального тестирования, гарантированных ограничений (rule-based/verification), интерпретируемости, защиты от reward-hacking.
-
-### 8) Инженерия/масштаб/оценка
-Есть: тесты (`tests/`), свипы (`run_sweep.py`), анализ (`analyze_*.py`), чекпоинты (`checkpointing.py`) и возобновление (`--resume-from`). Появилась важная инженерная метрика для инструментальных сред: `masked` vs `unmasked` (компетентность vs интернализация).  
-Не хватает: стабильного протокола бенчмарков “от простого к сложному”, и метрик уровня “способность” (capabilities) поверх голого reward (в т.ч. “сколько шагов до решения”, “сколько лишних действий”, “стабильность на OOD”).
-
-## Приоритетный план (что делать в этом репо)
-
-### Milestone A (инженерия + измеримость, 1–3 дня)
-Цель: “можем сохранять мозг, воспроизводить и сравнивать”.
-- Чекпоинты агента + (опционально) оптимайзеров.
-- Стандартный бенч-набор прогонов (несколько env_type, train/test, OOD) с единым JSON-отчётом.
-
-### Milestone B (инструменты как реальная среда, 1–2 недели)
-Цель: “агент реально решает задачи в репозитории (и не ломается без подсказок)”.
-- B0 (сделано): стабильный tool-loop для `proc_*_loop`, action-mask как реалистичный UI, отдельная метрика `unmasked` для проверки интернализации; в tool-loop `CYCLE_PATCHES` доступен под mask, корректный патч больше не форсируется первым.
-- B1 (в прогрессе): уменьшить разрыв `masked` vs `unmasked` (цель: близкие pass rate и шаги до решения).
-- B2 (следующее): расширить `RepoToolEnv` в сторону “почти-открытых” действий при фиксированном action-space (=6): поиск/инспекция/локальные правки по месту (не только выбор из 2 патчей), и постепенное усложнение процедурных задач (multi-file, регрессы, refactor).
-Определение готовности B1 (минимум): на `proc_mixed_loop` (seed 0..2) в `Eval[unmasked]` при `use_self=True, planning_coef=0.30` pass rate >= 0.85, а `mean steps to pass` <= 12 (masked pass rate при этом >= 0.95).
-
-### Milestone C (язык как слой абстракций, 2–6 недель)
-Цель: “инструкции → план → действия”.
-- Подключить нормальный language encoder/decoder (в идеале — предобученный), но через аккуратный интерфейс, чтобы не разрушить текущий пайплайн.
-- Ввести “scratchpad”/объяснения как наблюдаемую/проверяемую память.
-
-### Milestone D (длинный горизонт + lifelong, 1–3 месяца)
-Цель: “тысячи шагов без развала”.
-- Дерево поиска в латентном мире (MCTS/beam) + иерархия целей.
-- Retrieval memory (эпизодическая/семантическая) + консолидация (регуляризации/буферы/изоляция параметров).
-
-## Уже добавлено в коде (как база под масштаб)
-- Чекпоинты: `checkpointing.py`.
-- Флаги в `run_all.py`: `--resume-from`, `--checkpoint-path`, `--checkpoint-save-optim`.
-- Флаги в `run_all.py`: `--rl-steps`, `--stage2-updates`, `--stage4-updates`, `--eval-policy` (sample vs greedy).
-- `RepoToolEnv`: циклирование кандидатов патчей (`CYCLE_PATCHES`) + расширенный набор кандидатов.
-- `RepoToolEnv`: поддержка "микро-редактирования" через `RepoEdit` (строковые replace-правки).
-- `RepoToolEnv`: процедурные сценарии `proc_*` генерируют свежую задачу + тесты + N кандидатов патчей на каждом `reset()`.
-- `RepoToolEnv`: action `NO_OP` (0) циклирует "views" (патчи/файлы/pytest output/фокус-сниппет) для инспекции без новых действий.
-- `RepoToolEnv`: tool-loop режим `proc_*_loop` — меню кандидатов генерируется после первого падения тестов (ближе к “run → inspect → edit → rerun”).
-- `RepoToolEnv`: в `proc_*_loop` правильный фикс **не** форсируется в первой паре — агент должен уметь искать через `CYCLE_PATCHES` (и держать протокол действий без UI-маски).
-- `RepoToolEnv`: action-mask для tool-loop, чтобы отключать “нелепые” действия в неподходящей фазе (реалистичный UI вместо жёстких запретов).
-- `trainer.evaluate()`: печатает/возвращает `Eval[masked]` и `Eval[unmasked]` (компетентность vs интернализация).
-- `trainer.train_policy_a2c()`: KL-барьер на маску `-log(valid_mass)` (где `valid_mass = 1 - mean_invalid_mass`) + опциональный `--action-mask-dropout` (иногда учимся действовать без маски); GAE/targets считаются от `values.detach()` (без BPTT по rollout) — вместе это уменьшает разрыв `masked` vs `unmasked` (настраивается `--invalid-action-coef` и `--action-mask-dropout`).
-- `trainer.collect_onpolicy_experience()`: хранит logprob/value/entropy/invalid_mass как список тензоров (а не числовой буфер), чтобы не ломать autograd; рекуррентное состояние `h_w` detatchится между шагами (без BPTT на весь rollout).
-- `mixed`-пул: опционально включает `RepoToolEnv`, если задан `--repo-scenarios`.
-- Стандартная батарея бенчей: `bench.py` (быстрый режим: `python bench.py --quick`).
+## AGI Claim Rule
+Use "AGI-ready research prototype" wording until all `ROADMAP_v2.md` Gate4 conditions are satisfied and reproduced.

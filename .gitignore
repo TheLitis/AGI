@@ -9,3 +9,15 @@ sweep_results/*.json
 figures/
 *.png
 repo_sandboxes/
+
+# Temporary benchmark artifacts (keep stable milestone reports manually)
+bench_logs/probe_*.jsonl
+bench_logs/_tmp_*.jsonl
+reports/_dbg_*.json
+reports/_tmp_*.json
+reports/*probe*.json
+reports/*iter*.json
+reports/*post_*.json
+reports/*postfix*.json
+reports/*continue*.json
+reports/*.partial
