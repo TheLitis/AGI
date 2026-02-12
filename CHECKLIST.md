@@ -12,11 +12,13 @@
 - [ ] Run 1: `python bench.py --suite agi_v1 --quick --seeds 0,1,2 --report reports/agi_v1.quick.gate2.seed012.run1.json`
 - [ ] Run 2: `python bench.py --suite agi_v1 --quick --seeds 0,1,2 --report reports/agi_v1.quick.gate2.seed012.run2.json`
 - [ ] Confirm both reports show `overall.gates.gate2 == pass`
+- [ ] Validate report structure: `python validate_bench_report.py --report reports/agi_v1.quick.gate2.seed012.run1.json --expect-gate gate2=pass`
 
 ## 3) Gate3 Candidate Runs (robustness)
 - [ ] 5-seed full: `python bench.py --suite agi_v1 --seeds 0,1,2,3,4 --report reports/agi_v1.full.gate3.seed01234.json`
 - [ ] 5-seed OOD: `python bench.py --suite agi_v1 --ood --seeds 0,1,2,3,4 --report reports/agi_v1.full.ood.seed01234.json`
 - [ ] Confirm `overall.gates.gate3 == pass` and CI half-width constraints per suite
+- [ ] Validate report structure: `python validate_bench_report.py --report reports/agi_v1.full.gate3.seed01234.json --expect-gate gate3=pass`
 
 ## 4) Regression Discipline
 - [ ] Run targeted suites before/after risky changes:
