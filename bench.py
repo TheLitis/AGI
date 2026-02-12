@@ -835,7 +835,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seeds", type=str, nargs="*", default=None, help="Seeds to run (CSV or space list).")
     parser.add_argument("--quick", action="store_true", help="Smaller/faster settings for runnable suites.")
     parser.add_argument("--ood", action="store_true", help="Use OOD splits where supported.")
-    parser.add_argument("--hang_dump_sec", type=int, default=600, help="Stack dump interval for hangs (0 disables).")
+    parser.add_argument("--hang_dump_sec", type=int, default=0, help="Stack dump interval for hangs (0 disables).")
     parser.add_argument(
         "--max-episode-steps-eval",
         type=int,
@@ -1456,9 +1456,11 @@ def main() -> int:
         print("[BENCH] Windows + Python 3.13 detected: forcing CPU for repo cases for stability. Use --allow-cuda to override.")
 
     hang_sec = int(args.hang_dump_sec or 0)
+    watchdog_enabled = False
     if hang_sec > 0:
         faulthandler.enable()
         faulthandler.dump_traceback_later(hang_sec, repeat=True)
+        watchdog_enabled = True
 
     variants = [v.strip() for v in str(args.variants).split(",") if v.strip()]
     seeds = _parse_seeds(args.seeds)
@@ -1554,6 +1556,12 @@ def main() -> int:
     except KeyboardInterrupt:
         _save_report(report_path, report)
         raise
+    finally:
+        if watchdog_enabled:
+            try:
+                faulthandler.cancel_dump_traceback_later()
+            except Exception:
+                pass
 
     _save_report(report_path, report)
     print(f"[BENCH] Saved: {report_path}")
