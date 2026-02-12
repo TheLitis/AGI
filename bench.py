@@ -287,6 +287,21 @@ def _case_label(case: BenchCase) -> str:
     return f"{case.env_type}/{case.name}"
 
 
+def _optional_dependency_skip_reason(exc: Exception, env_type: str) -> Optional[str]:
+    if not isinstance(exc, ModuleNotFoundError):
+        return None
+    missing_name = str(getattr(exc, "name", "") or "").strip().lower()
+    message = str(exc).strip().lower()
+    if env_type == "minigrid":
+        minigrid_optional = {"pygame", "minigrid"}
+        if missing_name in minigrid_optional:
+            return missing_name
+        for dep in minigrid_optional:
+            if dep in message:
+                return dep
+    return None
+
+
 def _extract_eval_metrics(run_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     stage_metrics = run_result.get("stage_metrics", {}) if isinstance(run_result, dict) else {}
     eval_self = stage_metrics.get("eval_after_stage4_self")
@@ -818,9 +833,14 @@ def _run_suite(
                         repo_bc_pretrain_max_steps=int(eval_max_steps),
                     )
                 except Exception as exc:
-                    status = "error"
-                    error_msg = f"{type(exc).__name__}: {exc}"
-                    any_error = True
+                    skip_reason = _optional_dependency_skip_reason(exc, str(case.env_type))
+                    if skip_reason:
+                        status = "skipped"
+                        error_msg = f"skipped_optional_dependency:{skip_reason}"
+                    else:
+                        status = "error"
+                        error_msg = f"{type(exc).__name__}: {exc}"
+                        any_error = True
 
                 eval_metrics = _extract_eval_metrics(res or {})
                 timeout_eps = 0
