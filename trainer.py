@@ -376,6 +376,12 @@ class Trainer:
         self.meta_conflict_ma = 0.0
         self.meta_uncertainty_ma = 0.0
         self.meta_beta = 0.02  # чуть более быстрая адаптация
+        # Adaptive GAE(lambda) for long-horizon credit assignment.
+        self.gae_lambda_base = 0.95
+        self.gae_lambda_min = 0.90
+        self.gae_lambda_max = 0.99
+        self.gae_lambda_adapt_strength = 0.04
+        self.gae_lambda_horizon_scale = 24.0
         # optional skill usage stats for analysis/logging
         self.skill_usage_counts: Dict[int, int] = {}
 
@@ -444,6 +450,27 @@ class Trainer:
         factor = 0.5 + 0.5 * x   # ∈ [0.5,1.0]
 
         return base_planning_coef * factor
+
+    def get_adaptive_gae_lambda(self, base_gae_lambda: float) -> float:
+        """
+        Adaptive GAE(lambda) for long-horizon credit assignment.
+        - Stable regime (low conflict/uncertainty) + longer horizon -> larger lambda.
+        - Unstable regime -> smaller lambda to reduce variance.
+        """
+        c = max(0.0, float(self.meta_conflict_ma))
+        u = max(0.0, float(self.meta_uncertainty_ma))
+        horizon = max(1.0, float(getattr(self, "planning_horizon", 1)))
+        horizon_scale = max(1.0, float(getattr(self, "gae_lambda_horizon_scale", 24.0) or 24.0))
+        strength = max(0.0, float(getattr(self, "gae_lambda_adapt_strength", 0.04) or 0.04))
+        lam_min = max(0.0, min(1.0, float(getattr(self, "gae_lambda_min", 0.90) or 0.90)))
+        lam_max = max(lam_min, min(1.0, float(getattr(self, "gae_lambda_max", 0.99) or 0.99)))
+        base = max(lam_min, min(lam_max, float(base_gae_lambda)))
+
+        quality = 1.0 / (1.0 + c + u)  # in (0, 1]
+        quality_centered = 2.0 * quality - 1.0  # in (-1, 1]
+        horizon_factor = min(1.0, horizon / horizon_scale)
+        lam = base + strength * horizon_factor * quality_centered
+        return max(lam_min, min(lam_max, lam))
 
     def _env_desc_from_ids(self, env_ids: torch.Tensor) -> Optional[torch.Tensor]:
         if self.env_descriptors is None:
@@ -4009,12 +4036,14 @@ class Trainer:
 
         # Compute GAE targets from a detached critic to avoid backprop-through-time
         # across the whole rollout (stabilizes A2C and keeps graphs small).
+        gae_lambda_base = float(getattr(self, "gae_lambda_base", 0.95) or 0.95)
+        gae_lambda_eff = self.get_adaptive_gae_lambda(gae_lambda_base)
         advantages, returns_t = self._compute_gae(
             rewards=rewards,
             values=values.detach(),
             dones=dones,
             gamma=gamma,
-            gae_lambda=0.95,
+            gae_lambda=gae_lambda_eff,
         )
 
         adv_mean = advantages.mean()
@@ -4128,6 +4157,7 @@ class Trainer:
             "entropy_coef_eff": float(entropy_coef_eff),
             "mean_conflict": float(conflicts_t.mean().item()),
             "mean_uncertainty": float(uncertainties_t.mean().item()),
+            "gae_lambda_eff": float(gae_lambda_eff),
             "mean_invalid_action_mass": float(invalid_action_mass.mean().item())
             if invalid_action_mass is not None
             else 0.0,
@@ -4407,13 +4437,15 @@ class Trainer:
         mask_pred_auc = stats.get("mask_pred_auc", float("nan"))
         online_bc_loss = float(stats.get("online_bc_loss", 0.0))
         online_bc_samples = float(stats.get("online_bc_samples", 0.0))
+        gae_lambda_eff = float(stats.get("gae_lambda_eff", getattr(self, "gae_lambda_base", 0.95)))
         print(
             f"[A2C] use_self={use_self} | "
             f"mean_conflict={mean_conflict:.4f}, mean_uncertainty={mean_uncertainty:.4f}, "
             f"mean_invalid_mass={mean_invalid_mass:.4f} | "
             f"meta_conflict_ma={meta_conflict_ma:.4f}, meta_uncertainty_ma={meta_uncertainty_ma:.4f} | "
             f"entropy_coef_eff={entropy_eff:.5f}, curiosity_beta_eff={cur_beta_eff:.5f}, "
-            f"planning_coef_eff={planning_coef_eff:.5f}, planner_usage_frac={planner_usage_frac:.3f} | "
+            f"planning_coef_eff={planning_coef_eff:.5f}, gae_lambda_eff={gae_lambda_eff:.4f}, "
+            f"planner_usage_frac={planner_usage_frac:.3f} | "
             f"beta_conflict={beta_conflict:.3f}, beta_uncertainty={beta_uncertainty:.3f}, "
             f"mask_pred_f1={mask_pred_f1:.3f}, mask_pred_auc={mask_pred_auc:.3f}, "
             f"online_bc_loss={online_bc_loss:.4f}, online_bc_samples={online_bc_samples:.0f}"
