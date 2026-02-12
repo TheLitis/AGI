@@ -810,7 +810,9 @@ def _run_suite(
                         run_mode = "lifelong"
                         run_lifecycle = True
                         run_regime_aware_replay = True
-                        run_replay_frac_current = 0.7
+                        # Quick lifelong is variance-sensitive; a more balanced replay mix
+                        # improves forward-transfer stability without hurting forgetting.
+                        run_replay_frac_current = 0.5 if quick else 0.7
                         run_deterministic_torch = True
                     res = run_experiment(
                         seed=int(seed),
