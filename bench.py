@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import argparse
 import faulthandler
+import hashlib
 import json
 import math
+import platform
 import subprocess
 import sys
 import time
@@ -17,8 +19,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from experiment import run_experiment
 
-SCHEMA_VERSION = "0.1"
+SCHEMA_VERSION = "0.2"
 SUITE_ORDER = ["core", "tools", "tools_open", "language", "social", "lifelong", "safety"]
+REQUIRED_SUITES = ("core", "tools", "language", "social", "lifelong", "safety")
+
+GATE3_CI_THRESHOLDS = {
+    "core": 1.50,
+    "tools": 0.10,
+    "language": 0.10,
+    "social": 0.10,
+    "lifelong": 0.75,
+}
 
 
 def _sanitize(obj: Any) -> Any:
@@ -79,6 +90,101 @@ def _git_commit() -> str:
         return "unknown"
 
 
+def _stable_json_hash(payload: Any) -> str:
+    data = json.dumps(_sanitize(payload), sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()[:16]
+
+
+def _clamp01(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        return None
+    return max(0.0, min(1.0, float(value)))
+
+
+def _ratio_score(observed: Optional[float], target: float) -> Optional[float]:
+    if observed is None:
+        return None
+    if not isinstance(observed, (int, float)) or not math.isfinite(float(observed)):
+        return None
+    obs = float(observed)
+    if obs <= 0.0:
+        return 1.0
+    if target <= 0.0:
+        return 0.0
+    return _clamp01(float(target) / obs)
+
+
+def _ci95(values: List[float]) -> Optional[Dict[str, float]]:
+    clean = [float(v) for v in values if isinstance(v, (int, float)) and math.isfinite(float(v))]
+    n = len(clean)
+    if n == 0:
+        return None
+    mean_v = float(sum(clean) / n)
+    if n == 1:
+        std_v = 0.0
+        se_v = 0.0
+        hw_v = 0.0
+    else:
+        var_v = sum((x - mean_v) ** 2 for x in clean) / float(n - 1)
+        std_v = math.sqrt(max(0.0, var_v))
+        se_v = std_v / math.sqrt(float(n))
+        hw_v = 1.96 * se_v
+    return {
+        "n": int(n),
+        "mean": mean_v,
+        "std": std_v,
+        "se": se_v,
+        "half_width": hw_v,
+        "lower": mean_v - hw_v,
+        "upper": mean_v + hw_v,
+    }
+
+
+def _environment_fingerprint() -> Dict[str, Any]:
+    fp: Dict[str, Any] = {
+        "platform": str(sys.platform),
+        "python_version": str(sys.version.split()[0]),
+        "executable": str(sys.executable),
+        "machine": str(platform.machine()),
+        "processor": str(platform.processor()),
+    }
+    try:
+        import torch  # local import to keep bench lightweight when unavailable
+
+        fp["torch_version"] = str(getattr(torch, "__version__", "unknown"))
+        fp["cuda_available"] = bool(torch.cuda.is_available())
+    except Exception:
+        fp["torch_version"] = "unavailable"
+        fp["cuda_available"] = None
+    return fp
+
+
+def _refresh_run_manifest(report: Dict[str, Any]) -> None:
+    meta = report.get("meta", {})
+    if not isinstance(meta, dict):
+        return
+    cfg = meta.get("config", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    manifest = meta.get("run_manifest", {})
+    if not isinstance(manifest, dict):
+        manifest = {}
+    manifest["config_hash"] = _stable_json_hash(cfg)
+    seeds = meta.get("seed_list", [])
+    seed_list = [int(x) for x in seeds if isinstance(x, int)]
+    manifest["seed_list"] = seed_list
+    manifest["seed_count"] = len(seed_list)
+    manifest["git_commit"] = str(meta.get("git_commit", "unknown"))
+    manifest["suite"] = str(meta.get("suite", "unknown"))
+    manifest["ood"] = bool(meta.get("ood", False))
+    manifest["quick"] = bool(meta.get("quick", False))
+    manifest.setdefault("environment", _environment_fingerprint())
+    meta["config_hash"] = manifest["config_hash"]
+    meta["run_manifest"] = manifest
+
+
 def _atomic_write_report(path: Path, payload: Dict[str, Any]) -> None:
     partial_path = path.with_suffix(path.suffix + ".partial")
     partial_path.write_text(
@@ -115,31 +221,95 @@ def _refresh_overall(report: Dict[str, Any]) -> None:
             return float(v)
         return None
 
-    required = ("core", "tools", "language", "social", "lifelong", "safety")
+    def _suite_ci_half_width(suite_name: str) -> Optional[float]:
+        s = _suite(suite_name)
+        if not isinstance(s, dict):
+            return None
+        ci = s.get("ci", {})
+        if not isinstance(ci, dict):
+            return None
+        hw = ci.get("half_width")
+        if isinstance(hw, (int, float)) and math.isfinite(float(hw)):
+            return float(hw)
+        return None
+
+    required = REQUIRED_SUITES
+    capabilities: Dict[str, Optional[float]] = {
+        "generalization_score": None,
+        "sample_efficiency_score": None,
+        "robustness_score": None,
+        "tool_workflow_score": None,
+    }
+    confidence: Optional[float] = None
     all_required_present = all(_suite(name) is not None for name in required)
     if not all_required_present:
         gates = {
             "gate0": "pass" if suites else "fail",
             "gate1": "na",
             "gate2": "na",
+            "gate3": "na",
+            "gate4": "na",
         }
     else:
         statuses = {name: str((_suite(name) or {}).get("status")) for name in required}
         gate0 = "pass" if all(statuses.get(name) == "ok" for name in required) else "fail"
         gate1 = "fail"
         gate2 = "fail"
-        if gate0 == "pass":
-            tools_unmasked = _metric("tools", "pass_rate_unmasked")
-            tools_steps = _metric("tools", "mean_steps_to_pass_unmasked")
-            core_score = _suite("core").get("score") if isinstance(_suite("core"), dict) else None
-            core_score_v = float(core_score) if isinstance(core_score, (int, float)) and math.isfinite(float(core_score)) else None
-            lang_pass = _metric("language", "pass_rate")
-            lang_drop = _metric("language", "causal_drop")
-            soc_success = _metric("social", "success_rate")
-            soc_transfer = _metric("social", "transfer_rate")
-            ll_forget = _metric("lifelong", "forgetting_gap")
-            ll_forward = _metric("lifelong", "forward_transfer")
+        gate3 = "fail"
+        gate4 = "fail"
 
+        tools_unmasked = _metric("tools", "pass_rate_unmasked")
+        tools_steps = _metric("tools", "mean_steps_to_pass_unmasked")
+        tools_open_unmasked = _metric("tools_open", "pass_rate_unmasked")
+        tools_open_steps = _metric("tools_open", "mean_steps_to_pass_unmasked")
+        core_score = _suite("core").get("score") if isinstance(_suite("core"), dict) else None
+        core_score_v = float(core_score) if isinstance(core_score, (int, float)) and math.isfinite(float(core_score)) else None
+        lang_pass = _metric("language", "pass_rate")
+        lang_drop = _metric("language", "causal_drop")
+        soc_success = _metric("social", "success_rate")
+        soc_transfer = _metric("social", "transfer_rate")
+        ll_forget = _metric("lifelong", "forgetting_gap")
+        ll_forward = _metric("lifelong", "forward_transfer")
+
+        tools_step_score = _ratio_score(tools_steps, target=10.0)
+        tools_open_step_score = _ratio_score(tools_open_steps, target=12.0)
+        ll_forget_score = _clamp01((float(ll_forget) + 2.0) / 2.0) if ll_forget is not None else None
+        ll_forward_score = _clamp01((float(ll_forward) + 0.5) / 1.5) if ll_forward is not None else None
+        lang_stability = _clamp01(1.0 - float(lang_drop)) if lang_drop is not None else None
+
+        capabilities["generalization_score"] = _geometric_mean(
+            [x for x in [core_score_v, lang_pass, soc_transfer] if x is not None and x >= 0.0]
+        )
+        capabilities["sample_efficiency_score"] = _safe_mean(
+            [x for x in [tools_step_score, tools_open_step_score, lang_pass] if x is not None]
+        )
+        capabilities["robustness_score"] = _safe_mean(
+            [x for x in [ll_forget_score, ll_forward_score, lang_stability, soc_success] if x is not None]
+        )
+        capabilities["tool_workflow_score"] = _safe_mean(
+            [x for x in [tools_unmasked, tools_open_unmasked, tools_step_score, tools_open_step_score] if x is not None]
+        )
+
+        seed_list = (report.get("meta", {}) or {}).get("seed_list", [])
+        seed_count = len([x for x in seed_list if isinstance(x, int)])
+        seed_conf = _clamp01(float(seed_count) / 5.0)
+        coverage_conf = _clamp01(
+            float(len([name for name in required if statuses.get(name) == "ok"])) / float(len(required))
+        )
+        ci_quality: List[float] = []
+        for suite_name, thr in GATE3_CI_THRESHOLDS.items():
+            hw = _suite_ci_half_width(suite_name)
+            if hw is None:
+                continue
+            q = _clamp01(1.0 - (float(hw) / float(thr)))
+            if q is not None:
+                ci_quality.append(float(q))
+        ci_conf = _safe_mean(ci_quality)
+        if ci_conf is None:
+            ci_conf = 0.5
+        confidence = _safe_mean([x for x in [seed_conf, coverage_conf, ci_conf] if x is not None])
+
+        if gate0 == "pass":
             gate1_ok = all(
                 x is not None
                 for x in (core_score_v, tools_unmasked, lang_pass, lang_drop, soc_success, soc_transfer, ll_forget, ll_forward)
@@ -185,20 +355,50 @@ def _refresh_overall(report: Dict[str, Any]) -> None:
                 )
             gate2 = "pass" if gate2_ok else "fail"
 
+            gate3_ok = bool(gate2 == "pass" and seed_count >= 5)
+            if gate3_ok:
+                for suite_name, thr in GATE3_CI_THRESHOLDS.items():
+                    hw = _suite_ci_half_width(suite_name)
+                    if hw is None or float(hw) > float(thr):
+                        gate3_ok = False
+                        break
+            gate3 = "pass" if gate3_ok else "fail"
+
+            gate4_ok = bool(gate3 == "pass")
+            if gate4_ok:
+                gate4_ok = bool(
+                    capabilities.get("generalization_score") is not None
+                    and capabilities.get("sample_efficiency_score") is not None
+                    and capabilities.get("robustness_score") is not None
+                    and capabilities.get("tool_workflow_score") is not None
+                    and confidence is not None
+                    and float(capabilities["generalization_score"]) >= 0.80
+                    and float(capabilities["sample_efficiency_score"]) >= 0.75
+                    and float(capabilities["robustness_score"]) >= 0.75
+                    and float(capabilities["tool_workflow_score"]) >= 0.80
+                    and float(confidence) >= 0.80
+                )
+            gate4 = "pass" if gate4_ok else "fail"
+
         gates = {
             "gate0": gate0,
             "gate1": gate1,
             "gate2": gate2,
+            "gate3": gate3,
+            "gate4": gate4,
         }
 
     report["overall"] = {
         "agi_score": agi_score,
         "notes": notes,
         "gates": gates,
+        "capabilities": capabilities,
+        "confidence": confidence,
     }
 
 
 def _save_report(report_path: Path, report: Dict[str, Any]) -> None:
+    _refresh_run_manifest(report)
     _refresh_overall(report)
     _atomic_write_report(report_path, report)
 
@@ -450,6 +650,59 @@ def _lifelong_score(forgetting_gap: Optional[float], forward_transfer: Optional[
     return float(forget_component * forward_component)
 
 
+def _suite_ci_sample_values(suite_name: str, run_records: List[Dict[str, Any]]) -> List[float]:
+    values: List[float] = []
+    for record in run_records:
+        if record.get("status") != "ok":
+            continue
+        eval_metrics = record.get("eval") or {}
+        if suite_name == "tools":
+            pass_masked, pass_unmasked, _ = _extract_repo_metrics(eval_metrics)
+            primary = pass_unmasked if pass_unmasked is not None else pass_masked
+            if primary is not None:
+                values.append(float(primary))
+            continue
+        if suite_name == "tools_open":
+            _pass_masked, pass_unmasked, _ = _extract_repo_metrics(eval_metrics)
+            if pass_unmasked is not None:
+                values.append(float(pass_unmasked))
+            continue
+        if suite_name == "core":
+            v = eval_metrics.get("mean_return")
+            if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                values.append(float(v))
+            continue
+        if suite_name == "language":
+            pass_rate, _ = _language_rates_from_eval(eval_metrics)
+            if pass_rate is not None:
+                values.append(float(pass_rate))
+            continue
+        if suite_name == "social":
+            success_rate, _ = _social_rates_from_eval(eval_metrics)
+            if success_rate is not None:
+                values.append(float(success_rate))
+            continue
+        if suite_name == "lifelong":
+            res = record.get("result") or {}
+            if not isinstance(res, dict):
+                continue
+            stage_metrics = res.get("stage_metrics", {})
+            if not isinstance(stage_metrics, dict):
+                continue
+            ll = stage_metrics.get("lifelong_eval", {})
+            if not isinstance(ll, dict):
+                continue
+            ft_parts: List[float] = []
+            for key in ("lifelong_adaptation_R2_delta", "lifelong_adaptation_R3_delta"):
+                v = ll.get(key)
+                if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                    ft_parts.append(float(v))
+            if ft_parts:
+                values.append(float(sum(ft_parts) / len(ft_parts)))
+            continue
+    return values
+
+
 def _run_safety_smoke() -> Dict[str, Any]:
     try:
         import torch
@@ -642,6 +895,7 @@ def _run_suite(
         "name": suite.name,
         "status": "running",
         "score": None,
+        "ci": None,
         "metrics": _metric_template(suite.name),
         "per_env": [],
         "notes": [],
@@ -1176,6 +1430,7 @@ def _run_suite(
 
     suite_result["metrics"] = metrics
     suite_result["score"] = score
+    suite_result["ci"] = _ci95(_suite_ci_sample_values(suite.name, run_records))
     suite_status = "ok"
     if any_error:
         suite_status = "error"
@@ -1257,7 +1512,16 @@ def main() -> int:
                 "gate0": "fail",
                 "gate1": "na",
                 "gate2": "na",
+                "gate3": "na",
+                "gate4": "na",
             },
+            "capabilities": {
+                "generalization_score": None,
+                "sample_efficiency_score": None,
+                "robustness_score": None,
+                "tool_workflow_score": None,
+            },
+            "confidence": None,
         },
         "suites": [],
     }
