@@ -108,6 +108,18 @@ def _build_minigrid_env_pool(
     )
 
 
+def _optional_minigrid_dependency(exc: Exception) -> Optional[str]:
+    if not isinstance(exc, ModuleNotFoundError):
+        return None
+    missing_name = str(getattr(exc, "name", "") or "").strip().lower()
+    message = str(exc).strip().lower()
+    optional = ("pygame", "minigrid")
+    for dep in optional:
+        if missing_name == dep or dep in message:
+            return dep
+    return None
+
+
 def _build_tool_env_pool(
     seed: int,
     schedule_mode: str,
@@ -288,11 +300,19 @@ def _build_mixed_env_pool(
         episodes_per_phase=episodes_per_phase,
         max_steps_env=max_steps_env,
     )
-    mg_pool = _build_minigrid_env_pool(
-        seed=seed,
-        schedule_mode=schedule_mode,
-        scenario_names=minigrid_scenarios,
-    )
+    mg_pool: Optional[EnvPool] = None
+    minigrid_optional_dep: Optional[str] = None
+    try:
+        mg_pool = _build_minigrid_env_pool(
+            seed=seed,
+            schedule_mode=schedule_mode,
+            scenario_names=minigrid_scenarios,
+        )
+    except Exception as exc:
+        minigrid_optional_dep = _optional_minigrid_dependency(exc)
+        if minigrid_optional_dep is None:
+            raise
+        print(f"[WARN] Mixed env pool: skipping MiniGrid due to missing optional dependency '{minigrid_optional_dep}'.")
     comp_pool = _build_computer_env_pool(
         seed=seed,
         schedule_mode=schedule_mode,
@@ -310,14 +330,15 @@ def _build_mixed_env_pool(
 
     offset = len(grid_pool.envs)
     mg_envs = []
-    for i, env in enumerate(mg_pool.envs):
-        # rebase env_id to avoid collisions
-        new_id = offset + i
-        if hasattr(env, "_env_id"):
-            env._env_id = new_id
-        if hasattr(env, "_env_name"):
-            env._env_name = f"mg_{getattr(env, '_env_name', env.env_name)}"
-        mg_envs.append(env)
+    if mg_pool is not None:
+        for i, env in enumerate(mg_pool.envs):
+            # rebase env_id to avoid collisions
+            new_id = offset + i
+            if hasattr(env, "_env_id"):
+                env._env_id = new_id
+            if hasattr(env, "_env_name"):
+                env._env_name = f"mg_{getattr(env, '_env_name', env.env_name)}"
+            mg_envs.append(env)
 
     offset_comp = offset + len(mg_envs)
     comp_envs = []
@@ -343,8 +364,8 @@ def _build_mixed_env_pool(
     envs = grid_pool.envs + mg_envs + comp_envs + repo_envs
     grid_train = list(grid_pool.train_env_ids or [])
     grid_test = list(grid_pool.test_env_ids or [])
-    mg_train = [offset + i for i in (mg_pool.train_env_ids or [])]
-    mg_test = [offset + i for i in (mg_pool.test_env_ids or [])]
+    mg_train = [offset + i for i in (mg_pool.train_env_ids or [])] if mg_pool is not None else []
+    mg_test = [offset + i for i in (mg_pool.test_env_ids or [])] if mg_pool is not None else []
     comp_train = [offset_comp + i for i in (comp_pool.train_env_ids or [])]
     comp_test = [offset_comp + i for i in (comp_pool.test_env_ids or [])]
     repo_train = [offset_repo + i for i in (repo_pool.train_env_ids or [])] if repo_pool is not None else []
@@ -360,8 +381,10 @@ def _build_mixed_env_pool(
         train_env_ids=train_ids,
         test_env_ids=test_ids,
     )
+    if minigrid_optional_dep is not None:
+        env_pool.minigrid_optional_dependency_error = f"skipped_optional_dependency:{minigrid_optional_dep}"  # type: ignore[attr-defined]
     # preserve MiniGrid metadata for logging/analysis
-    if hasattr(mg_pool, "task_metadata"):
+    if mg_pool is not None and hasattr(mg_pool, "task_metadata"):
         env_pool.task_metadata = getattr(mg_pool, "task_metadata")  # type: ignore[attr-defined]
     if hasattr(comp_pool, "task_metadata"):
         env_pool.task_metadata_computer = getattr(comp_pool, "task_metadata")  # type: ignore[attr-defined]
