@@ -214,8 +214,8 @@ def _build_social_env_pool(
 ) -> EnvPool:
     from social_env import SocialEnv, SocialEnvConfig
 
-    # Keep social tasks challenging but avoid long sparse trajectories in quick mode.
-    cfg = SocialEnvConfig(size=7, view_size=5, max_steps=40, compete_probability=0.35)
+    # Keep social tasks challenging while reducing run-to-run variance.
+    cfg = SocialEnvConfig(size=7, view_size=5, max_steps=40, compete_probability=0.25)
     train_env = SocialEnv(config=cfg, env_id=0, env_name="social_train", seed=seed + 0)
     test_env = SocialEnv(config=cfg, env_id=1, env_name="social_test", seed=seed + 1)
 
