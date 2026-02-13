@@ -302,10 +302,12 @@ class Trainer:
         # only high-confidence predictions are used, with limited strength.
         # We adapt both threshold and mix from mask-predictor quality to avoid
         # over-constraining unmasked evaluation when the predictor is weak.
-        self.unmasked_mask_bias_mix = 0.50
-        self.unmasked_mask_confidence_threshold = 0.88
-        self.unmasked_mask_confidence_threshold_high = 0.93
-        self.unmasked_mask_auc_quality_threshold = 0.88
+        # Keep unmasked transfer biased enough toward learned validity priors so
+        # repo/tool loops stay stable across seeds while still requiring confidence.
+        self.unmasked_mask_bias_mix = 0.75
+        self.unmasked_mask_confidence_threshold = 0.85
+        self.unmasked_mask_confidence_threshold_high = 0.90
+        self.unmasked_mask_auc_quality_threshold = 0.82
         self.mask_pred_auc_ema = float("nan")
         self.mask_pred_auc_ema_decay = 0.95
         self.repo_online_bc_coef = max(0.0, float(repo_online_bc_coef or 0.0))

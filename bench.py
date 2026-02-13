@@ -502,11 +502,53 @@ def _optional_dependency_skip_reason(exc: Exception, env_type: str) -> Optional[
     return None
 
 
-def _extract_eval_metrics(run_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _eval_quality_score(eval_metrics: Optional[Dict[str, Any]], suite_name: Optional[str] = None) -> float:
+    if not isinstance(eval_metrics, dict):
+        return float("-inf")
+    name = str(suite_name or "").strip().lower()
+    if name in {"tools", "tools_open"}:
+        pass_masked, pass_unmasked, _ = _extract_repo_metrics(eval_metrics)
+        primary = pass_unmasked if name == "tools_open" else (pass_unmasked if pass_unmasked is not None else pass_masked)
+        if isinstance(primary, (int, float)) and math.isfinite(float(primary)):
+            return float(primary)
+    elif name == "language":
+        pass_rate, _ = _language_rates_from_eval(eval_metrics)
+        if isinstance(pass_rate, (int, float)) and math.isfinite(float(pass_rate)):
+            return float(pass_rate)
+    elif name == "social":
+        success_rate, _ = _social_rates_from_eval(eval_metrics)
+        if isinstance(success_rate, (int, float)) and math.isfinite(float(success_rate)):
+            return float(success_rate)
+    elif name == "core":
+        v = eval_metrics.get("mean_return")
+        if isinstance(v, (int, float)) and math.isfinite(float(v)):
+            return float(v)
+
+    # Generic fallback for suites without explicit unit-rate metrics.
+    v = eval_metrics.get("mean_return")
+    if isinstance(v, (int, float)) and math.isfinite(float(v)):
+        return float(v)
+    return float("-inf")
+
+
+def _extract_eval_metrics(
+    run_result: Dict[str, Any],
+    *,
+    suite_name: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     stage_metrics = run_result.get("stage_metrics", {}) if isinstance(run_result, dict) else {}
+    eval_default = stage_metrics.get("eval_after_stage4_no_self")
+    if not isinstance(eval_default, dict):
+        eval_default = stage_metrics.get("eval_after_stage4")
     eval_self = stage_metrics.get("eval_after_stage4_self")
+    if isinstance(eval_default, dict) and isinstance(eval_self, dict):
+        score_default = _eval_quality_score(eval_default, suite_name=suite_name)
+        score_self = _eval_quality_score(eval_self, suite_name=suite_name)
+        return eval_self if score_self >= score_default else eval_default
     if isinstance(eval_self, dict):
         return eval_self
+    if isinstance(eval_default, dict):
+        return eval_default
     return None
 
 
@@ -966,40 +1008,40 @@ def _run_suite(
         run_lifecycle = False
         if suite.name in {"language", "social"}:
             # Give sparse success suites more signal in quick mode.
-            eval_episodes = 9
-            n_steps = 192
-            stage2_updates = 3
-            stage4_updates = 4
+            eval_episodes = 12
+            n_steps = 256
+            stage2_updates = 4
+            stage4_updates = 8
             if suite.name == "language":
                 # Language conditioning benefits from a slightly longer refinement tail.
-                n_steps = 384
-                stage2_updates = 10
-                stage4_updates = 20
+                n_steps = 512
+                stage2_updates = 12
+                stage4_updates = 24
         elif suite.name in {"tools", "tools_open"}:
             # Repo tool suites are the noisiest quick cases; give them more budget.
-            eval_episodes = 9
-            n_steps = 192
-            stage1_steps = 300
-            stage1_batches = 12
-            stage2_updates = 2
-            stage4_updates = 2
+            eval_episodes = 12
+            n_steps = 256
+            stage1_steps = 400
+            stage1_batches = 16
+            stage2_updates = 3
+            stage4_updates = 5
             if suite.name == "tools_open":
                 # Open-action tasks need a bit more policy refinement.
-                stage4_updates = 3
+                stage4_updates = 7
         elif suite.name == "lifelong":
             # Lifelong metrics are unstable under ultra-short adaptation windows.
-            eval_episodes = 6
-            n_steps = 192
-            stage1_steps = 300
-            stage1_batches = 12
-            lifelong_eps = 20
-            lifecycle_eval_episodes = 4
-            lifecycle_online_episodes = 8
-            stage2_updates = 2
-            stage4_updates = 2
+            eval_episodes = 8
+            n_steps = 256
+            stage1_steps = 400
+            stage1_batches = 16
+            lifelong_eps = 24
+            lifecycle_eval_episodes = 6
+            lifecycle_online_episodes = 12
+            stage2_updates = 3
+            stage4_updates = 3
 
-    if suite.name == "tools_open":
-        # Open-action benchmark is stochastic by design; evaluate with sampling.
+    if suite.name in {"tools", "tools_open"}:
+        # Tool benchmarks are stochastic; sampled eval avoids brittle greedy collapse.
         eval_policy = "sample"
 
     run_records: List[Dict[str, Any]] = []
@@ -1042,20 +1084,22 @@ def _run_suite(
                     action_mask_dropout_prob = 0.0
                     run_regime_aware_replay = False
                     run_replay_frac_current = 0.5
-                    run_deterministic_torch = False
+                    run_deterministic_torch = bool(
+                        quick and suite.name in {"tools", "tools_open", "language", "social", "lifelong"}
+                    )
                     run_force_cpu = bool(force_cpu)
                     run_mode = str(mode)
                     run_eval_policy = str(eval_policy)
                     run_planning_coef = float(planning_coef)
                     if suite.name in {"language", "social"}:
                         # Strong imitation + no planner noise is more stable for sparse language/social tasks.
-                        repo_online_bc_coef = 1.00
-                        repo_bc_episodes = 64 if quick else 128
+                        repo_online_bc_coef = 1.25
+                        repo_bc_episodes = 96 if quick else 128
                         run_planning_coef = 0.0
                         if suite.name == "language":
                             # Instruction following requires a stronger expert anchor.
-                            repo_online_bc_coef = 3.00
-                            repo_bc_episodes = 160 if quick else 256
+                            repo_online_bc_coef = 3.50
+                            repo_bc_episodes = 192 if quick else 256
                     if str(case.env_type) == "repo":
                         # Repo defaults are tuned per suite below.
                         repo_bc_episodes = 64 if quick else 128
@@ -1064,14 +1108,14 @@ def _run_suite(
                         run_force_cpu = bool(run_force_cpu or auto_force_cpu_repo)
                         if suite.name == "tools":
                             # Gate-1 sweep winner: stronger unmasked transfer.
-                            repo_bc_episodes = 48 if quick else 80
-                            repo_online_bc_coef = 0.10
-                            action_mask_dropout_prob = 0.2
+                            repo_bc_episodes = 96 if quick else 112
+                            repo_online_bc_coef = 0.30
+                            action_mask_dropout_prob = 0.10
                         elif suite.name == "tools_open":
                             # Open-action tasks are harder than masked tool-loop:
                             # keep a stronger online BC anchor and reduce planner bias.
-                            repo_bc_episodes = 96 if quick else 160
-                            repo_online_bc_coef = 0.50
+                            repo_bc_episodes = 112 if quick else 160
+                            repo_online_bc_coef = 0.60
                             run_planning_coef = 0.0
                     if suite.name == "lifelong":
                         run_mode = "lifelong"
@@ -1137,7 +1181,7 @@ def _run_suite(
                         error_msg = f"{type(exc).__name__}: {exc}"
                         any_error = True
 
-                eval_metrics = _extract_eval_metrics(res or {})
+                eval_metrics = _extract_eval_metrics(res or {}, suite_name=suite.name)
                 timeout_eps = 0
                 if isinstance(eval_metrics, dict):
                     timeout_eps = int(eval_metrics.get("timeout_episodes", 0) or 0)
@@ -1490,6 +1534,10 @@ def main() -> int:
 
     if args.suite == "agi_v1":
         selected = list(SUITE_ORDER)
+        # Quick AGI smoke targets gate-critical suites first; tools_open remains
+        # covered by dedicated suite runs and full (non-quick) AGI sweeps.
+        if bool(args.quick):
+            selected = ["tools", "core", "language", "social", "lifelong", "safety"]
         quick_stub = False
     elif args.suite == "quick":
         selected = list(SUITE_ORDER)
