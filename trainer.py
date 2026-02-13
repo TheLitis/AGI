@@ -300,13 +300,12 @@ class Trainer:
         self.action_mask_prediction_coef = max(0.0, float(action_mask_prediction_coef or 0.0))
         # Conservative unmasked bias from predicted action-mask logits:
         # only high-confidence predictions are used, with limited strength.
-        # We adapt confidence threshold from mask-predictor quality:
-        # lower threshold for weak predictor (to recover recall), higher for strong
-        # predictor (to reduce overconfident false constraints).
-        self.unmasked_mask_bias_mix = 1.00
-        self.unmasked_mask_confidence_threshold = 0.85
-        self.unmasked_mask_confidence_threshold_high = 0.90
-        self.unmasked_mask_auc_quality_threshold = 0.84
+        # We adapt both threshold and mix from mask-predictor quality to avoid
+        # over-constraining unmasked evaluation when the predictor is weak.
+        self.unmasked_mask_bias_mix = 0.50
+        self.unmasked_mask_confidence_threshold = 0.88
+        self.unmasked_mask_confidence_threshold_high = 0.93
+        self.unmasked_mask_auc_quality_threshold = 0.88
         self.mask_pred_auc_ema = float("nan")
         self.mask_pred_auc_ema_decay = 0.95
         self.repo_online_bc_coef = max(0.0, float(repo_online_bc_coef or 0.0))
@@ -575,6 +574,26 @@ class Trainer:
             return max(0.5, min(1.0, low))
         return max(0.5, min(1.0, high))
 
+    def _effective_unmasked_mask_bias_mix(self) -> float:
+        base = float(getattr(self, "unmasked_mask_bias_mix", 0.0) or 0.0)
+        base = max(0.0, min(1.0, base))
+        if base <= 0.0:
+            return 0.0
+        quality_thr = float(getattr(self, "unmasked_mask_auc_quality_threshold", 0.84) or 0.84)
+        quality_thr = max(1.0e-6, quality_thr)
+        try:
+            auc = float(getattr(self, "mask_pred_auc_ema", float("nan")))
+        except Exception:
+            auc = float("nan")
+        if not math.isfinite(auc):
+            return base
+        if auc >= quality_thr:
+            return base
+        ratio = max(0.0, min(1.0, auc / quality_thr))
+        # Keep a small floor so confident predictions can still help when quality is moderate.
+        ratio = max(0.25, ratio)
+        return base * ratio
+
     def _compose_policy_logits_with_masks(
         self,
         logits: torch.Tensor,
@@ -598,7 +617,7 @@ class Trainer:
                 # Oracle mask has invalid actions: use full prior from predicted mask logits.
                 return self._apply_predicted_mask_bias(logits, mask_logits_pred, mix=1.0)
             # Unmasked mode: apply a conservative, confidence-gated prior only.
-            unmasked_mix = float(getattr(self, "unmasked_mask_bias_mix", 0.0) or 0.0)
+            unmasked_mix = self._effective_unmasked_mask_bias_mix()
             conf_thr = self._effective_unmasked_mask_confidence_threshold()
             return self._apply_predicted_mask_bias(
                 logits,
@@ -2512,6 +2531,18 @@ class Trainer:
         """
         if not isinstance(ep_info, dict):
             return None
+        if "instruction_success" in ep_info:
+            v = ep_info.get("instruction_success")
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                return bool(float(v) >= 0.5)
+        if "social_success" in ep_info:
+            v = ep_info.get("social_success")
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                return bool(float(v) >= 0.5)
         if "last_test_passed" in ep_info:
             return bool(ep_info.get("last_test_passed"))
 

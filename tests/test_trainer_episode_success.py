@@ -17,3 +17,9 @@ def test_episode_success_falls_back_to_reward_sign():
     assert Trainer._infer_episode_success_from_info({"reward_env": 0.2}) is True
     assert Trainer._infer_episode_success_from_info({"reward_env": -0.2}) is False
     assert Trainer._infer_episode_success_from_info({"reward_env": 0.0}) is None
+
+
+def test_episode_success_prefers_explicit_instruction_and_social_flags():
+    assert Trainer._infer_episode_success_from_info({"instruction_success": True, "reward_env": -1.0}) is True
+    assert Trainer._infer_episode_success_from_info({"instruction_success": False, "reason": "took_correct_goal"}) is False
+    assert Trainer._infer_episode_success_from_info({"social_success": True, "reason": "took_wrong_goal"}) is True

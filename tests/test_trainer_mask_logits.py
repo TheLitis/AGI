@@ -116,3 +116,15 @@ def test_compose_policy_logits_uses_adaptive_unmasked_confidence_threshold_from_
         apply_hard_mask=True,
     )
     assert out_low_quality[0, 0] > out_low_quality[0, 1]
+
+
+def test_effective_unmasked_mask_mix_scales_down_for_low_quality_auc():
+    trainer = _trainer_with_mask_coef(0.1)
+    trainer.unmasked_mask_bias_mix = 0.6
+    trainer.unmasked_mask_auc_quality_threshold = 0.8
+    trainer.mask_pred_auc_ema = 0.9
+    mix_high = trainer._effective_unmasked_mask_bias_mix()
+    trainer.mask_pred_auc_ema = 0.4
+    mix_low = trainer._effective_unmasked_mask_bias_mix()
+    assert mix_high == 0.6
+    assert 0.0 < mix_low < mix_high

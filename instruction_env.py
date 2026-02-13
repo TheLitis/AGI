@@ -273,6 +273,7 @@ class InstructionEnv(BaseEnv):
         target = str(self.scenario_configs[self.current_scenario_id].get("target", "A")).upper()
         size = int(self.grid.shape[0])
         tx, ty = (1, 1) if target == "A" else (size - 2, size - 2)
+        instruction_success: Optional[bool] = None
         if moved and action in {0, 1, 2, 3}:
             prev_dist = abs(int(ax) - int(tx)) + abs(int(ay) - int(ty))
             cur_ax, cur_ay = int(self.agent_pos[0]), int(self.agent_pos[1])
@@ -291,14 +292,23 @@ class InstructionEnv(BaseEnv):
                 if took == target:
                     reward_env = float(self.config.success_reward)
                     reason = "took_correct_goal"
+                    instruction_success = True
                 else:
                     reward_env = float(self.config.wrong_reward)
                     reason = "took_wrong_goal"
+                    instruction_success = False
                 done = True
 
         if not done and self.steps >= int(self.config.max_steps):
             done = True
             reason = "max_steps"
+            ax, ay = self.agent_pos
+            dist_to_target = abs(int(ax) - int(tx)) + abs(int(ay) - int(ty))
+            instruction_success = bool(dist_to_target <= 1)
+
+        ax, ay = self.agent_pos
+        dist_to_target = abs(int(ax) - int(tx)) + abs(int(ay) - int(ty))
+        at_target = bool(dist_to_target == 0)
 
         info: Dict[str, Any] = {
             "env_id": int(self.env_id),
@@ -306,6 +316,10 @@ class InstructionEnv(BaseEnv):
             "env_family": str(self.env_family),
             "scenario_id": int(self.current_scenario_id),
             "scenario_name": str(self.current_scenario_name),
+            "instruction_target": str(target),
+            "at_target": bool(at_target),
+            "distance_to_target": int(dist_to_target),
+            "instruction_success": instruction_success,
             "reward_env": float(reward_env),
             "got_food": False,
             "took_damage": False,
