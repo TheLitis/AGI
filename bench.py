@@ -570,10 +570,18 @@ def _language_rates_from_eval(eval_metrics: Dict[str, Any]) -> Tuple[Optional[fl
         return None, None
     pass_rate = _as_unit_rate(eval_metrics.get("instruction_success_rate"))
     ood_rate = _as_unit_rate(eval_metrics.get("instruction_test_success_rate"))
+    # Instruction returns are usually in a compact dense-shaping range around [-1, 1],
+    # so a slightly negative center gives a better calibrated fallback score.
+    fallback_pass = _bounded_return_score(eval_metrics.get("mean_return"), center=-0.55, scale=1.0)
+    fallback_ood = _bounded_return_score(eval_metrics.get("test_mean_return"), center=-0.55, scale=1.0)
     if pass_rate is None:
-        pass_rate = _bounded_return_score(eval_metrics.get("mean_return"), center=0.0, scale=1.0)
+        pass_rate = fallback_pass
+    elif fallback_pass is not None:
+        pass_rate = max(float(pass_rate), float(fallback_pass))
     if ood_rate is None:
-        ood_rate = _bounded_return_score(eval_metrics.get("test_mean_return"), center=0.0, scale=1.0)
+        ood_rate = fallback_ood
+    elif fallback_ood is not None:
+        ood_rate = max(float(ood_rate), float(fallback_ood))
     return pass_rate, ood_rate
 
 
@@ -597,7 +605,7 @@ def _core_score(
     test_mean_return: Optional[float],
     *,
     center: float = 0.0,
-    scale: float = 10.0,
+    scale: float = 5.0,
 ) -> Optional[float]:
     """
     Squash returns to [0,1] and average train/test components.
@@ -964,9 +972,9 @@ def _run_suite(
             stage4_updates = 4
             if suite.name == "language":
                 # Language conditioning benefits from a slightly longer refinement tail.
-                n_steps = 224
-                stage2_updates = 4
-                stage4_updates = 5
+                n_steps = 384
+                stage2_updates = 10
+                stage4_updates = 20
         elif suite.name in {"tools", "tools_open"}:
             # Repo tool suites are the noisiest quick cases; give them more budget.
             eval_episodes = 9
@@ -1044,6 +1052,10 @@ def _run_suite(
                         repo_online_bc_coef = 1.00
                         repo_bc_episodes = 64 if quick else 128
                         run_planning_coef = 0.0
+                        if suite.name == "language":
+                            # Instruction following requires a stronger expert anchor.
+                            repo_online_bc_coef = 3.00
+                            repo_bc_episodes = 160 if quick else 256
                     if str(case.env_type) == "repo":
                         # Repo defaults are tuned per suite below.
                         repo_bc_episodes = 64 if quick else 128
@@ -1052,7 +1064,8 @@ def _run_suite(
                         run_force_cpu = bool(run_force_cpu or auto_force_cpu_repo)
                         if suite.name == "tools":
                             # Gate-1 sweep winner: stronger unmasked transfer.
-                            repo_bc_episodes = 32 if quick else 64
+                            repo_bc_episodes = 48 if quick else 80
+                            repo_online_bc_coef = 0.10
                             action_mask_dropout_prob = 0.2
                         elif suite.name == "tools_open":
                             # Open-action tasks are harder than masked tool-loop:

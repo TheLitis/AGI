@@ -1,0 +1,326 @@
+{
+  "schema_version": "0.2",
+  "meta": {
+    "timestamp": 1770942515,
+    "git_commit": "2e1a54ba244da328b7051301b14b1105f9e9f46f",
+    "seed_list": [
+      0
+    ],
+    "suite": "agi_v1",
+    "ood": false,
+    "quick": true,
+    "config": {
+      "mode": "stage4",
+      "variants": [
+        "full"
+      ],
+      "use_skills": false,
+      "skill_mode": "handcrafted",
+      "n_latent_skills": 0,
+      "masked_only": false,
+      "unmasked_only": false,
+      "eval_max_steps": 200,
+      "force_cpu": false,
+      "auto_force_cpu_repo": true,
+      "eval_episodes": 6,
+      "lifecycle_eval_episodes": 4,
+      "lifecycle_online_episodes": 8,
+      "self_model_batches": 20,
+      "self_reflection_batches": 5,
+      "stage3c_batches": 5,
+      "stage3c_collect_episodes": 2,
+      "n_steps": 192,
+      "stage2_updates": 2,
+      "stage4_updates": 2,
+      "eval_policy": "greedy",
+      "run_self_reflection": false,
+      "run_stage3c": false,
+      "run_lifecycle": false
+    },
+    "config_hash": "cacf0918e6cbe74c",
+    "run_manifest": {
+      "config_hash": "cacf0918e6cbe74c",
+      "seed_list": [
+        0
+      ],
+      "seed_count": 1,
+      "git_commit": "2e1a54ba244da328b7051301b14b1105f9e9f46f",
+      "suite": "agi_v1",
+      "ood": false,
+      "quick": true,
+      "environment": {
+        "platform": "win32",
+        "python_version": "3.14.3",
+        "executable": "C:\\Users\\loval\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+        "machine": "AMD64",
+        "processor": "Intel64 Family 6 Model 165 Stepping 5, GenuineIntel",
+        "torch_version": "2.10.0+cpu",
+        "cuda_available": false
+      }
+    }
+  },
+  "overall": {
+    "agi_score": 0.7429474701169604,
+    "notes": [],
+    "gates": {
+      "gate0": "pass",
+      "gate1": "pass",
+      "gate2": "pass",
+      "gate3": "fail",
+      "gate4": "fail"
+    },
+    "capabilities": {
+      "generalization_score": 0.7925112481258463,
+      "sample_efficiency_score": 0.9017359619124079,
+      "robustness_score": 0.870127313142093,
+      "tool_workflow_score": 0.9166666666666666
+    },
+    "confidence": 0.7333333333333334
+  },
+  "suites": [
+    {
+      "name": "core",
+      "status": "ok",
+      "score": 0.9411045676224785,
+      "ci": {
+        "n": 1,
+        "mean": 13.55574688911438,
+        "std": 0.0,
+        "se": 0.0,
+        "half_width": 0.0,
+        "lower": 13.55574688911438,
+        "upper": 13.55574688911438
+      },
+      "metrics": {
+        "mean_return": 13.55574688911438,
+        "test_mean_return": 14.174014568328857,
+        "ood_gap": null
+      },
+      "per_env": [
+        {
+          "env": "gridworld/basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 0,
+          "variant": "full",
+          "status": "skipped",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "error": "skipped_optional_dependency:pygame"
+        }
+      ],
+      "notes": [
+        "skipped_optional_dependency:pygame"
+      ]
+    },
+    {
+      "name": "tools",
+      "status": "ok",
+      "score": 0.8888888888888888,
+      "ci": {
+        "n": 1,
+        "mean": 0.8888888888888888,
+        "std": 0.0,
+        "se": 0.0,
+        "half_width": 0.0,
+        "lower": 0.8888888888888888,
+        "upper": 0.8888888888888888
+      },
+      "metrics": {
+        "pass_rate_masked": 1.0,
+        "pass_rate_unmasked": 0.8888888888888888,
+        "mean_steps_to_pass_unmasked": 4.875,
+        "invalid_action_rate": null,
+        "mask_pred_f1": 0.5581774207696838,
+        "mask_pred_auc": 0.7230696555530363,
+        "bc_pretrain_used": true,
+        "action_mask_dropout_prob": 0.2,
+        "repo_online_bc_coef": 0.1,
+        "repo_bc_pretrain_episodes": 48.0,
+        "mean_invalid_mass": 0.28668351471424103,
+        "ood_gap": null
+      },
+      "per_env": [
+        {
+          "env": "tool_env/basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.8888888888888888,
+          "steps": 4.875,
+          "invalid_rate": null
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "tools_open",
+      "status": "ok",
+      "score": 0.7777777777777778,
+      "ci": {
+        "n": 1,
+        "mean": 0.7777777777777778,
+        "std": 0.0,
+        "se": 0.0,
+        "half_width": 0.0,
+        "lower": 0.7777777777777778,
+        "upper": 0.7777777777777778
+      },
+      "metrics": {
+        "pass_rate_unmasked": 0.7777777777777778,
+        "mean_steps_to_pass_unmasked": 11.142857142857142,
+        "invalid_action_rate": null,
+        "ood_gap": null
+      },
+      "per_env": [
+        {
+          "env": "repo_tool_env/train:proc_mixed_open,test:proc_mixed_open",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 0.7777777777777778,
+          "pass_rate_unmasked": 0.7777777777777778,
+          "steps": 11.142857142857142,
+          "invalid_rate": null
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "language",
+      "status": "ok",
+      "score": 0.6791786991753931,
+      "ci": {
+        "n": 1,
+        "mean": 0.7052078857372237,
+        "std": 0.0,
+        "se": 0.0,
+        "half_width": 0.0,
+        "lower": 0.7052078857372237,
+        "upper": 0.7052078857372237
+      },
+      "metrics": {
+        "pass_rate": 0.7052078857372237,
+        "ood_pass_rate": 0.6791786991753931,
+        "causal_drop": 0.02602918656183062
+      },
+      "per_env": [
+        {
+          "env": "instruction/instruction_basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "social",
+      "status": "ok",
+      "score": 0.75,
+      "ci": {
+        "n": 1,
+        "mean": 0.7777777777777778,
+        "std": 0.0,
+        "se": 0.0,
+        "half_width": 0.0,
+        "lower": 0.7777777777777778,
+        "upper": 0.7777777777777778
+      },
+      "metrics": {
+        "success_rate": 0.7777777777777778,
+        "transfer_rate": 0.75
+      },
+      "per_env": [
+        {
+          "env": "social/social_basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "lifelong",
+      "status": "ok",
+      "score": 0.5074139928269688,
+      "ci": {
+        "n": 1,
+        "mean": 1.3188683302700515,
+        "std": 0.0,
+        "se": 0.0,
+        "half_width": 0.0,
+        "lower": 1.3188683302700515,
+        "upper": 1.3188683302700515
+      },
+      "metrics": {
+        "forgetting_gap": -0.5424786772951506,
+        "forward_transfer": 1.3188683302700515
+      },
+      "per_env": [
+        {
+          "env": "gridworld/basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "safety",
+      "status": "ok",
+      "score": null,
+      "ci": null,
+      "metrics": {
+        "safety_planner_ok": true,
+        "constraint_compliance": null,
+        "catastrophic_fail_rate": null
+      },
+      "per_env": [],
+      "notes": []
+    }
+  ]
+}
