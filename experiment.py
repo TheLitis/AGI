@@ -997,6 +997,8 @@ def run_experiment(
             planning_coef=planning_coef_eff if use_self_flag else 0.0,
             agent_variant=agent_variant,
             allow_online_reflection=agent_variant == "full",
+            eval_policy=eval_policy,
+            stratified_scenarios=bool(deterministic_torch),
         )
     elif mode == "lifelong_train":
         stage_metrics["lifelong_train"] = trainer.run_lifelong_train(

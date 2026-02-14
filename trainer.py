@@ -1929,6 +1929,8 @@ class Trainer:
         episodes: int = 10,
         max_steps: int = 200,
         use_self: bool = True,
+        eval_policy: str = "sample",
+        stratified_scenarios: bool = False,
     ) -> float:
         """
         Lightweight evaluation for a specific regime (used for forgetting metrics).
@@ -1936,8 +1938,19 @@ class Trainer:
         self.current_regime_name = regime.name
         returns: List[float] = []
         reward_profile = regime.reward_profile or {}
-        for _ in range(max(1, episodes)):
-            scenario_id = self._sample_scenario_for_regime(regime, scenario_map)
+        eval_policy_norm = (eval_policy or "sample").lower()
+        if eval_policy_norm not in {"sample", "greedy"}:
+            eval_policy_norm = "sample"
+        scenario_plan = self._build_episode_scenario_plan(
+            regime=regime,
+            name_to_id=scenario_map,
+            n_episodes=max(1, int(episodes)),
+            stratified=bool(stratified_scenarios),
+        )
+        for ep_idx in range(max(1, episodes)):
+            scenario_id = scenario_plan[ep_idx] if ep_idx < len(scenario_plan) else None
+            if scenario_id is None:
+                scenario_id = self._sample_scenario_for_regime(regime, scenario_map)
             obs = self.env.reset(scenario_id=scenario_id)
             patch = obs["patch"]
             energy = obs["energy"]
@@ -1998,8 +2011,11 @@ class Trainer:
                     G_t = self.agent.workspace(W_t, S_t, H_t, V_pi, delta_self, U_t, traits, M)
                     logits = self.agent.policy(G_t)
                     logits = self._apply_action_mask(logits)
-                    dist = Categorical(logits=logits)
-                    action = dist.sample()
+                    if eval_policy_norm == "greedy":
+                        action = torch.argmax(logits, dim=-1)
+                    else:
+                        dist = Categorical(logits=logits)
+                        action = dist.sample()
 
                 next_obs, _, done, info = self.env.step(action.item())
                 reward_env = self.compute_preference_reward(info, reward_profile=reward_profile)
@@ -2053,6 +2069,67 @@ class Trainer:
             if r <= acc:
                 return int(sid)
         return int(entries[-1])
+
+    def _build_episode_scenario_plan(
+        self,
+        regime: RegimeConfig,
+        name_to_id: Dict[str, int],
+        n_episodes: int,
+        *,
+        stratified: bool,
+    ) -> List[Optional[int]]:
+        """
+        Build per-episode scenario ids for a regime.
+
+        When `stratified=True`, enforce weighted counts per chapter to reduce
+        sampling variance while keeping the same expected scenario mix.
+        """
+        n = max(0, int(n_episodes))
+        if n == 0:
+            return []
+        if not regime.scenario_weights:
+            return [None] * n
+
+        entries: List[int] = []
+        weights: List[float] = []
+        for name, w in regime.scenario_weights.items():
+            sid = name_to_id.get(str(name).lower())
+            if sid is None:
+                continue
+            entries.append(int(sid))
+            weights.append(max(0.0, float(w)))
+        if not entries:
+            return [None] * n
+
+        if not stratified:
+            return [self._sample_scenario_for_regime(regime, name_to_id) for _ in range(n)]
+
+        total = float(sum(weights))
+        if total <= 0.0:
+            return [int(entries[0])] * n
+
+        raw = [float(n) * (w / total) for w in weights]
+        counts = [int(math.floor(x)) for x in raw]
+        remaining = int(n - sum(counts))
+        if remaining > 0:
+            order = sorted(range(len(raw)), key=lambda i: (raw[i] - counts[i]), reverse=True)
+            for i in order[:remaining]:
+                counts[i] += 1
+        elif remaining < 0:
+            order = sorted(range(len(raw)), key=lambda i: counts[i], reverse=True)
+            for i in order[: (-remaining)]:
+                counts[i] = max(0, counts[i] - 1)
+
+        plan: List[Optional[int]] = []
+        for sid, cnt in zip(entries, counts):
+            if cnt > 0:
+                plan.extend([int(sid)] * int(cnt))
+        while len(plan) < n:
+            plan.append(int(entries[-1]))
+        if len(plan) > n:
+            plan = plan[:n]
+        random.shuffle(plan)
+        return plan
 
     def _reward_profile_for_regime(self, regime_name: str) -> Dict[str, float]:
         """
@@ -7006,6 +7083,8 @@ class Trainer:
         agent_variant: str = "full",
         regime_configs: Optional[List[RegimeConfig]] = None,
         allow_online_reflection: bool = True,
+        eval_policy: str = "sample",
+        stratified_scenarios: bool = False,
         lr: float = 5e-2,
         lambda_reg: float = 1e-2,
         lambda_conflict: float = 0.0,
@@ -7025,6 +7104,9 @@ class Trainer:
         use_self_flag = agent_variant != "no_self"
         allow_trait_updates = agent_variant == "full" and use_self_flag
         reflect_enabled = allow_online_reflection and allow_trait_updates
+        eval_policy_norm = (eval_policy or "sample").lower()
+        if eval_policy_norm not in {"sample", "greedy"}:
+            eval_policy_norm = "sample"
 
         alpha_conf = 0.2
         alpha_unc = 0.2
@@ -7099,9 +7181,16 @@ class Trainer:
             chapter_survival: List[float] = []
             chapter_uncertainty: List[float] = []
             scenario_counts: Dict[str, int] = {}
-
-            for _ in range(episodes_per_chapter):
-                scenario_id = self._sample_scenario_for_regime(regime, scenario_map)
+            scenario_plan = self._build_episode_scenario_plan(
+                regime=regime,
+                name_to_id=scenario_map,
+                n_episodes=int(episodes_per_chapter),
+                stratified=bool(stratified_scenarios),
+            )
+            for ep_idx in range(episodes_per_chapter):
+                scenario_id = scenario_plan[ep_idx] if ep_idx < len(scenario_plan) else None
+                if scenario_id is None:
+                    scenario_id = self._sample_scenario_for_regime(regime, scenario_map)
                 obs = self.env.reset(scenario_id=scenario_id)
                 patch = obs["patch"]
                 energy = obs["energy"]
@@ -7236,8 +7325,11 @@ class Trainer:
                             logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
 
                         logits = self._apply_action_mask(logits)
-                        dist = Categorical(logits=logits)
-                        action = dist.sample()
+                        if eval_policy_norm == "greedy":
+                            action = torch.argmax(logits, dim=-1)
+                        else:
+                            dist = Categorical(logits=logits)
+                            action = dist.sample()
 
                     next_obs, _, done, info = self.env.step(action.item())
                     reward_env = self.compute_preference_reward(
@@ -7429,6 +7521,8 @@ class Trainer:
             "agent_variant": agent_variant,
             "use_self": use_self_flag,
             "online_reflection": reflect_enabled,
+            "eval_policy": eval_policy_norm,
+            "stratified_scenarios": bool(stratified_scenarios),
             "episodes_per_chapter": int(episodes_per_chapter),
             "lifelong_regimes": [rc.name for rc in schedule],
             "lifelong_reward_profiles": {
