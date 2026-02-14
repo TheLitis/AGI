@@ -883,6 +883,17 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated agent variants to run.",
     )
     parser.add_argument("--seeds", type=str, nargs="*", default=None, help="Seeds to run (CSV or space list).")
+    parser.add_argument(
+        "--suites",
+        type=str,
+        default=None,
+        help="Optional subset of suites to run (CSV), e.g. 'tools,core,language'.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume an existing report: skip suites already marked ok/stub and rerun incomplete ones.",
+    )
     parser.add_argument("--quick", action="store_true", help="Smaller/faster settings for runnable suites.")
     parser.add_argument("--ood", action="store_true", help="Use OOD splits where supported.")
     parser.add_argument("--hang_dump_sec", type=int, default=0, help="Stack dump interval for hangs (0 disables).")
@@ -941,6 +952,11 @@ def _run_suite(
     report: Dict[str, Any],
     report_path: Path,
 ) -> Dict[str, Any]:
+    if not isinstance(report.get("suites"), list):
+        report["suites"] = []
+    report["suites"] = [
+        s for s in report["suites"] if not (isinstance(s, dict) and s.get("name") == suite.name)
+    ]
     suite_result: Dict[str, Any] = {
         "name": suite.name,
         "status": "running",
@@ -1073,6 +1089,34 @@ def _run_suite(
     for case in suite.cases:
         for variant in variants:
             for seed in seeds:
+                if quick and suite.name == "tools" and str(case.env_type) == "tools":
+                    suite_result["notes"].append("quick_skip_tools_basic_case")
+                    suite_result["per_env"].append(
+                        {
+                            "env": _case_label(case),
+                            "seed": int(seed),
+                            "variant": str(variant),
+                            "status": "skipped",
+                            "pass": None,
+                            "pass_rate_masked": None,
+                            "pass_rate_unmasked": None,
+                            "steps": None,
+                            "invalid_rate": None,
+                            "error": "quick_skip_tools_basic_case",
+                        }
+                    )
+                    run_records.append(
+                        {
+                            "case": case,
+                            "variant": variant,
+                            "seed": seed,
+                            "result": {},
+                            "eval": {},
+                            "status": "skipped",
+                        }
+                    )
+                    _save_report(report_path, report)
+                    continue
                 run_id = f"bench_{suite.name}_{case.name}_{variant}_seed{seed}"
                 print(f"[BENCH] suite={suite.name} case={case.name} env={case.env_type} variant={variant} seed={seed}")
                 status = "ok"
@@ -1546,55 +1590,109 @@ def main() -> int:
         selected = [args.suite]
         quick_stub = False
 
-    report: Dict[str, Any] = {
-        "schema_version": SCHEMA_VERSION,
-        "meta": {
+    subset = _split_csv(args.suites)
+    if subset:
+        wanted = {str(x).strip() for x in subset if str(x).strip()}
+        selected = [name for name in selected if name in wanted]
+
+    report_cfg: Dict[str, Any] = {
+        "mode": str(args.mode),
+        "variants": variants,
+        "use_skills": bool(args.use_skills),
+        "skill_mode": str(args.skill_mode),
+        "n_latent_skills": int(args.n_latent_skills),
+        "masked_only": bool(args.masked_only),
+        "unmasked_only": bool(args.unmasked_only),
+        "eval_max_steps": int(args.max_episode_steps_eval),
+        "force_cpu": bool(effective_force_cpu),
+        "auto_force_cpu_repo": bool(auto_force_cpu_repo),
+    }
+
+    report: Dict[str, Any]
+    if bool(args.resume) and report_path.exists():
+        try:
+            loaded = json.loads(report_path.read_text(encoding="utf-8"))
+            report = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            report = {}
+    else:
+        report = {}
+
+    if not report:
+        report = {
+            "schema_version": SCHEMA_VERSION,
+            "meta": {},
+            "overall": {},
+            "suites": [],
+        }
+
+    report["schema_version"] = SCHEMA_VERSION
+    meta = report.get("meta")
+    if not isinstance(meta, dict):
+        meta = {}
+    meta.update(
+        {
             "timestamp": int(ts),
             "git_commit": _git_commit(),
             "seed_list": seeds,
             "suite": str(args.suite),
             "ood": bool(args.ood),
             "quick": bool(args.quick) or bool(quick_stub),
-            "config": {
-                "mode": str(args.mode),
-                "variants": variants,
-                "use_skills": bool(args.use_skills),
-                "skill_mode": str(args.skill_mode),
-                "n_latent_skills": int(args.n_latent_skills),
-                "masked_only": bool(args.masked_only),
-                "unmasked_only": bool(args.unmasked_only),
-                "eval_max_steps": int(args.max_episode_steps_eval),
-                "force_cpu": bool(effective_force_cpu),
-                "auto_force_cpu_repo": bool(auto_force_cpu_repo),
-            },
+            "config": report_cfg,
+        }
+    )
+    report["meta"] = meta
+
+    overall = report.get("overall")
+    if not isinstance(overall, dict):
+        overall = {}
+    overall.setdefault("agi_score", 0.0)
+    overall.setdefault("notes", [])
+    overall.setdefault(
+        "gates",
+        {
+            "gate0": "fail",
+            "gate1": "na",
+            "gate2": "na",
+            "gate3": "na",
+            "gate4": "na",
         },
-        "overall": {
-            "agi_score": 0.0,
-            "notes": [],
-            "gates": {
-                "gate0": "fail",
-                "gate1": "na",
-                "gate2": "na",
-                "gate3": "na",
-                "gate4": "na",
-            },
-            "capabilities": {
-                "generalization_score": None,
-                "sample_efficiency_score": None,
-                "robustness_score": None,
-                "tool_workflow_score": None,
-            },
-            "confidence": None,
+    )
+    overall.setdefault(
+        "capabilities",
+        {
+            "generalization_score": None,
+            "sample_efficiency_score": None,
+            "robustness_score": None,
+            "tool_workflow_score": None,
         },
-        "suites": [],
-    }
+    )
+    overall.setdefault("confidence", None)
+    report["overall"] = overall
+    if not isinstance(report.get("suites"), list):
+        report["suites"] = []
+
     _save_report(report_path, report)
 
     try:
+        completed_status: Dict[str, str] = {}
+        if bool(args.resume):
+            for entry in report.get("suites", []):
+                if not isinstance(entry, dict):
+                    continue
+                name = str(entry.get("name", "")).strip()
+                status = str(entry.get("status", "")).strip().lower()
+                if name:
+                    completed_status[name] = status
         for name in selected:
             spec = suite_specs.get(name)
             if spec is None:
                 continue
+            if bool(args.resume):
+                prev_status = completed_status.get(name, "")
+                if prev_status in {"ok", "stub"}:
+                    print(f"[BENCH] resume skip suite={name} status={prev_status}")
+                    continue
             _run_suite(
                 spec,
                 seeds=seeds,
