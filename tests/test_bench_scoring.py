@@ -23,6 +23,21 @@ def test_lifelong_score_prefers_low_forgetting_and_positive_transfer():
     assert 0.0 <= bad < good <= 1.0
 
 
+def test_lifelong_forward_transfer_uses_weighted_r2_r3():
+    v = bench._lifelong_forward_transfer_from_eval(
+        {
+            "lifelong_adaptation_R2_delta": 1.0,
+            "lifelong_adaptation_R3_delta": 0.0,
+        }
+    )
+    assert v == 0.6
+
+
+def test_lifelong_forward_transfer_falls_back_to_single_delta():
+    assert bench._lifelong_forward_transfer_from_eval({"lifelong_adaptation_R2_delta": 0.25}) == 0.25
+    assert bench._lifelong_forward_transfer_from_eval({"lifelong_adaptation_R3_delta": -0.5}) == -0.5
+
+
 def test_suite_specs_enable_language_social_lifelong():
     specs = bench._build_suite_specs(
         minigrid_override=None,

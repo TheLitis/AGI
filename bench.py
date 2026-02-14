@@ -700,6 +700,28 @@ def _lifelong_score(forgetting_gap: Optional[float], forward_transfer: Optional[
     return float(forget_component * forward_component)
 
 
+def _lifelong_forward_transfer_from_eval(payload: Dict[str, Any]) -> Optional[float]:
+    """
+    Aggregate adaptation deltas with a mild emphasis on the first shift.
+
+    R2 captures transfer immediately after the first non-stationary switch and
+    is usually less confounded by cumulative drift than later chapters.
+    """
+    if not isinstance(payload, dict):
+        return None
+    r2 = payload.get("lifelong_adaptation_R2_delta")
+    r3 = payload.get("lifelong_adaptation_R3_delta")
+    has_r2 = isinstance(r2, (int, float)) and math.isfinite(float(r2))
+    has_r3 = isinstance(r3, (int, float)) and math.isfinite(float(r3))
+    if has_r2 and has_r3:
+        return float(0.60 * float(r2) + 0.40 * float(r3))
+    if has_r2:
+        return float(r2)
+    if has_r3:
+        return float(r3)
+    return None
+
+
 def _suite_ci_sample_values(suite_name: str, run_records: List[Dict[str, Any]]) -> List[float]:
     values: List[float] = []
     for record in run_records:
@@ -742,13 +764,9 @@ def _suite_ci_sample_values(suite_name: str, run_records: List[Dict[str, Any]]) 
             ll = stage_metrics.get("lifelong_eval", {})
             if not isinstance(ll, dict):
                 continue
-            ft_parts: List[float] = []
-            for key in ("lifelong_adaptation_R2_delta", "lifelong_adaptation_R3_delta"):
-                v = ll.get(key)
-                if isinstance(v, (int, float)) and math.isfinite(float(v)):
-                    ft_parts.append(float(v))
-            if ft_parts:
-                values.append(float(sum(ft_parts) / len(ft_parts)))
+            ft = _lifelong_forward_transfer_from_eval(ll)
+            if ft is not None:
+                values.append(float(ft))
             continue
     return values
 
@@ -1024,7 +1042,7 @@ def _run_suite(
         run_lifecycle = False
         if suite.name in {"language", "social"}:
             # Give sparse success suites more signal in quick mode.
-            eval_episodes = 12
+            eval_episodes = 16
             n_steps = 256
             stage2_updates = 4
             stage4_updates = 8
@@ -1512,13 +1530,9 @@ def _run_suite(
             fg = ll.get("lifelong_forgetting_R1_gap")
             if isinstance(fg, (int, float)) and math.isfinite(float(fg)):
                 forgetting_vals.append(float(fg))
-            ft_parts: List[float] = []
-            for key in ("lifelong_adaptation_R2_delta", "lifelong_adaptation_R3_delta"):
-                v = ll.get(key)
-                if isinstance(v, (int, float)) and math.isfinite(float(v)):
-                    ft_parts.append(float(v))
-            if ft_parts:
-                transfer_vals.append(float(sum(ft_parts) / len(ft_parts)))
+            ft = _lifelong_forward_transfer_from_eval(ll)
+            if ft is not None:
+                transfer_vals.append(float(ft))
         forgetting_gap = _safe_mean(forgetting_vals)
         forward_transfer = _safe_mean(transfer_vals)
         metrics.update(
