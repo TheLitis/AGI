@@ -34,20 +34,23 @@ Updated: 2026-02-15
   - `lifelong.score = 0.5718`
   - `safety.score = 0.7703`
 - Priority-suite 5-seed quick snapshots (isolated):
-  - `reports/bench_long_horizon_quick_seed01234.autonomy4.json`
-    - `long_horizon.score = 0.7609`
-    - `long_horizon.ci.half_width = 0.0258`
-  - `reports/bench_lifelong_quick_seed01234.autonomy4.json`
-    - `lifelong.score = 0.5092`
-    - `lifelong.forgetting_gap = 0.9794`
-    - `lifelong.forward_transfer = 0.1842`
-    - `lifelong.ci.half_width = 0.0727`
+  - `reports/bench_long_horizon_quick_seed01234.phase1_m23.json`
+    - `long_horizon.score = 0.8135`
+    - `long_horizon.ci.half_width = 0.0144`
+  - `reports/bench_lifelong_quick_seed01234.phase1_m23.json`
+    - `lifelong.score = 0.5852`
+    - `lifelong.forgetting_gap = 0.2031`
+    - `lifelong.forward_transfer = 1.7203`
+    - `lifelong.ci.half_width = 0.0648`
   - `reports/bench_safety_quick_seed01234.autonomy4.json`
     - `safety.score = 0.7444`
     - `constraint_compliance = 0.55`
     - `catastrophic_fail_rate = 0.25`
+- Internal Gate2-Strict mountain opener:
+  - `python scripts/check_mountains_open.py --long-horizon-report reports/bench_long_horizon_quick_seed01234.phase1_m23.json --lifelong-report reports/bench_lifelong_quick_seed01234.phase1_m23.json`
+  - result: `[OPEN]` (Mountain #2/#3 opened on isolated suites)
 - Note:
-  - priority-suite snapshots above are directional diagnostics and not the canonical validated AGI reference.
+  - priority-suite snapshots above are directional diagnostics and not the canonical validated AGI reference; canonical AGI gates stay blocked until `core/language` runtime fix.
 - Infra update completed:
   - dedicated `long_horizon` suite added to AGI-bench runs
   - `trainer.evaluate()` now emits operational safety metrics (`constraint_compliance`, `catastrophic_fail_rate`, `death_rate`, `reason_counts`)
@@ -55,8 +58,8 @@ Updated: 2026-02-15
   - lifelong CI now computed from per-run lifelong score instead of raw transfer deltas
 
 ## 2.1 Active Execution Priority
-1. Mountain #2: long-horizon planning quality and stability.
-2. Mountain #3: lifelong adaptation under drift after long-horizon changes.
+1. Recover canonical baseline health by fixing `core/language` runtime failures.
+2. Preserve and re-validate Mountain #2/#3 gains on canonical AGI quick runs.
 3. Mountain #7: safety/alignment hardening (catastrophic failure reduction).
 4. Remaining mountains after 1-3 are stabilized.
 
@@ -109,7 +112,7 @@ Status: mostly complete, keep regression discipline.
 
 ### Phase B (Close Gate2)
 Status: not confirmed on the current validated baseline.
-- Historical tuning artifacts indicate prior Gate2-level performance, but the current canonical baseline has `gate0=fail`.
+- Mountain #2/#3 Gate2-Strict thresholds are open on isolated 5-seed reports, but the current canonical baseline still has `gate0=fail`.
 - Immediate requirement: fix `core/language` runtime errors, then regenerate validated multi-seed AGI quick baseline.
 
 ### Phase C (Close Gate3)
@@ -119,7 +122,7 @@ Status: not confirmed on the current validated baseline.
 
 ### Phase D (8-mountain completeness)
 Status: in progress.
-- Long-horizon and safety base suites are now wired into bench.
+- Long-horizon and safety base suites are now wired into bench; Mountain #2/#3 are open in isolated 5-seed checks.
 - Current blockers are metric quality and multi-seed robustness (especially catastrophic safety outcomes, deep ToM, stronger multimodality), not only gate math.
 
 ## 5. 8-Mountain Matrix (metric -> test -> DoD)

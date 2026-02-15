@@ -1,0 +1,170 @@
+{
+  "schema_version": "0.2",
+  "meta": {
+    "timestamp": 1771176398,
+    "git_commit": "f2145c2a508ba78bef81481f5c77ac06e0320ff8",
+    "seed_list": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "suite": "long_horizon",
+    "ood": false,
+    "quick": true,
+    "config": {
+      "mode": "stage4",
+      "variants": [
+        "full"
+      ],
+      "use_skills": false,
+      "skill_mode": "handcrafted",
+      "n_latent_skills": 0,
+      "masked_only": false,
+      "unmasked_only": false,
+      "eval_max_steps": 200,
+      "force_cpu": false,
+      "auto_force_cpu_repo": false,
+      "eval_episodes": 8,
+      "lifecycle_eval_episodes": 2,
+      "lifecycle_online_episodes": 2,
+      "self_model_batches": 20,
+      "self_reflection_batches": 5,
+      "stage3c_batches": 5,
+      "stage3c_collect_episodes": 2,
+      "n_steps": 256,
+      "stage2_updates": 3,
+      "stage4_updates": 4,
+      "eval_policy": "greedy",
+      "run_self_reflection": false,
+      "run_stage3c": false,
+      "run_lifecycle": false
+    },
+    "config_hash": "ec2e4470d8f4a2e6",
+    "run_manifest": {
+      "config_hash": "ec2e4470d8f4a2e6",
+      "seed_list": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "seed_count": 5,
+      "git_commit": "f2145c2a508ba78bef81481f5c77ac06e0320ff8",
+      "suite": "long_horizon",
+      "ood": false,
+      "quick": true,
+      "environment": {
+        "platform": "win32",
+        "python_version": "3.12.10",
+        "executable": "C:\\Users\\loval\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "machine": "AMD64",
+        "processor": "Intel64 Family 6 Model 165 Stepping 5, GenuineIntel",
+        "torch_version": "2.10.0+cpu",
+        "cuda_available": false
+      }
+    }
+  },
+  "overall": {
+    "agi_score": 0.8134965594527854,
+    "notes": [],
+    "gates": {
+      "gate0": "pass",
+      "gate1": "na",
+      "gate2": "na",
+      "gate3": "na",
+      "gate4": "na"
+    },
+    "capabilities": {
+      "generalization_score": null,
+      "sample_efficiency_score": null,
+      "robustness_score": null,
+      "tool_workflow_score": null
+    },
+    "confidence": null
+  },
+  "suites": [
+    {
+      "name": "long_horizon",
+      "status": "ok",
+      "score": 0.8134965594527854,
+      "ci": {
+        "n": 5,
+        "mean": 0.9818914415514328,
+        "std": 0.01648527396787565,
+        "se": 0.007372438643975527,
+        "half_width": 0.014449979742192032,
+        "lower": 0.9674414618092408,
+        "upper": 0.9963414212936248
+      },
+      "metrics": {
+        "mean_return": 83.56918487399817,
+        "test_mean_return": 72.97562930981319,
+        "horizon_utilization": 0.9472916666666666,
+        "timeout_rate": 0.0,
+        "planner_gain": -1.5699180126190186,
+        "catastrophic_fail_rate": 0.2
+      },
+      "per_env": [
+        {
+          "env": "gridworld/h120",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        }
+      ],
+      "notes": []
+    }
+  ]
+}

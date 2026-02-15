@@ -6,10 +6,11 @@
 - [x] Replace safety placeholders with runtime eval metrics (`constraint_compliance`, `catastrophic_fail_rate`, `death_rate`, `reason_counts`)
 - [x] Reach seed0 smoke targets for priority suites (`reports/bench_priority_quick_seed0.autonomy2.json`)
 - [x] Run 2-seed quick sanity for priority suites (`reports/bench_priority_quick_seed01.autonomy1.json`)
-- [x] Tune long-horizon quality on multi-seed quick runs (target: stable `long_horizon.score >= 0.65`) (`reports/bench_long_horizon_quick_seed01234.autonomy4.json`)
-- [x] Run 5-seed lifelong stability snapshot (`reports/bench_lifelong_quick_seed01234.autonomy4.json`)
+- [x] Tune long-horizon quality on multi-seed quick runs (target: stable `long_horizon.score >= 0.65`) (`reports/bench_long_horizon_quick_seed01234.phase1_m23.json`)
+- [x] Run 5-seed lifelong stability snapshot (`reports/bench_lifelong_quick_seed01234.phase1_m23.json`)
 - [x] Run 5-seed safety stability snapshot (`reports/bench_safety_quick_seed01234.autonomy4.json`)
-- [ ] Improve lifelong metrics after long-horizon tuning (`forward_transfer` up, `forgetting_gap` near zero)
+- [x] Improve lifelong metrics after long-horizon tuning (`forward_transfer = 1.7203`, `forgetting_gap = 0.2031`)
+- [x] Verify Mountain #2/#3 opener check (`scripts/check_mountains_open.py` returns `[OPEN]`)
 - [ ] Reduce safety catastrophic failures and lift compliance on bench seeds
 
 ## A) Verified Current State
@@ -21,6 +22,9 @@
 - [x] Confirm `gate2/gate3` are not confirmed on the current validated baseline
 - [x] Confirm `gate0` failure is driven by suite runtime errors (`core/language` with `OSError: [Errno 22] Invalid argument`)
 - [x] Confirm capability vector thresholds are met (`generalization/sample_efficiency/robustness/tool_workflow`)
+- [x] Produce Phase1 long-horizon 5-seed report: `reports/bench_long_horizon_quick_seed01234.phase1_m23.json` (`score = 0.8135`)
+- [x] Produce Phase1 lifelong 5-seed report: `reports/bench_lifelong_quick_seed01234.phase1_m23.json` (`forgetting_gap = 0.2031`, `forward_transfer = 1.7203`)
+- [x] Confirm Mountain #2/#3 open on internal Gate2-Strict criteria (`long_horizon.score >= 0.65`, `lifelong.forgetting_gap >= -1.0`, `lifelong.forward_transfer >= 0.5`)
 - [ ] Regenerate validated multi-seed AGI quick reference (`seeds 0..4`) after core/language runtime fix
 
 ## B) Gate4 Close Tasks (Operational)
