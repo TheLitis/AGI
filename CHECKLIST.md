@@ -1,5 +1,13 @@
 ﻿# Execution Checklist (Roadmap v2, Synced 2026-02-15)
 
+## P0) Active Sprint Priority
+- [x] Add dedicated `long_horizon` suite and wire it into AGI bench selection order
+- [x] Add per-case `max_steps_env` plumbing (`bench.py` -> `run_experiment`)
+- [x] Replace safety placeholders with runtime eval metrics (`constraint_compliance`, `catastrophic_fail_rate`, `death_rate`, `reason_counts`)
+- [ ] Tune long-horizon quality on multi-seed quick runs (target: stable `long_horizon.score >= 0.65`)
+- [ ] Improve lifelong metrics after long-horizon tuning (`forward_transfer` up, `forgetting_gap` near zero)
+- [ ] Reduce safety catastrophic failures and lift compliance on bench seeds
+
 ## A) Verified Current State
 - [x] Verify gate/schema unit tests: `python -m pytest tests/test_bench_gates.py tests/test_agi_bench_report.py tests/test_bench_scoring.py -q`
 - [x] Verify full test suite health: `python -m pytest -q`
@@ -21,7 +29,8 @@
 - [ ] Confirm Gate status consistency between quick/full/OOD runs
 
 ## D) 8-Mountain Depth Backlog
-- [ ] Add long-horizon benchmark suite (100+ step planning and hierarchical subgoals)
+- [x] Add long-horizon benchmark suite (100+ step planning and hierarchical subgoals)
+- [x] Add runtime safety metrics to evaluation + bench safety suite consumption
 - [ ] Add adversarial safety/OOD pack (constraint compliance + catastrophic fail metrics)
 - [ ] Add stronger social/ToM transfer metrics
 - [ ] Expand multimodal coverage (beyond current text/grid/tool stack)

@@ -10,6 +10,12 @@ Source of truth: `ROADMAP_v2.md`.
 - Immediate blocker to Gate4:
   - `overall.confidence = 0.7846` (threshold: `>= 0.80`).
 
+## Active Priority Order
+1. Long-horizon planning quality (Mountain #2).
+2. Lifelong adaptation/forgetting stability (Mountain #3).
+3. Safety/alignment hardening (Mountain #7).
+4. Then expansion of remaining mountains.
+
 ## Confirmed Metrics Snapshot
 - capabilities:
   - `generalization_score = 0.8314`
@@ -33,13 +39,20 @@ Source of truth: `ROADMAP_v2.md`.
 - Lifelong variance stabilization:
   - stratified scenario scheduling
   - policy-controlled lifelong eval
+- Long-horizon benchmark wiring:
+  - dedicated `long_horizon` suite
+  - per-case `max_steps_env` control in `run_experiment`
+  - horizon/planner metrics and scoring in `bench.py`
+- Safety metric wiring:
+  - `trainer.evaluate()` now exports `constraint_compliance`, `catastrophic_fail_rate`, `death_rate`, `reason_counts`
+  - `safety` suite now uses real eval metrics + planner smoke check
 - Quick language/lifelong stabilization for Gate3 reliability.
 
 ## Immediate Next Milestones
-1. Raise `overall.confidence` to `>= 0.80` (primary Gate4 blocker).
-2. Reproduce current Gate3 pass in at least one additional independent 5-seed rerun.
-3. Complete full + OOD 5-seed acceptance runs (`--suite agi_v1`, non-quick).
-4. Expand mountain coverage where tests are still shallow (long-horizon, safety/adversarial, ToM).
+1. Raise long-horizon score/CI on multi-seed quick runs (not one-seed only).
+2. Lift lifelong `forward_transfer` while keeping `forgetting_gap` near zero after long-horizon tuning.
+3. Reduce safety `catastrophic_fail_rate` and raise `constraint_compliance` from current weak baseline.
+4. After 1-3 stabilize, re-run full Gate4 confidence push (`overall.confidence >= 0.80`).
 
 ## AGI Claim Rule
 Use "AGI-ready research prototype" wording until all `ROADMAP_v2.md` Gate4 conditions are satisfied and independently reproduced.

@@ -21,6 +21,16 @@ Updated: 2026-02-15
   - `sample_efficiency_score = 0.8548`
   - `robustness_score = 0.8864`
   - `tool_workflow_score = 0.95`
+- Infra update completed:
+  - dedicated `long_horizon` suite added to AGI-bench runs
+  - `trainer.evaluate()` now emits operational safety metrics (`constraint_compliance`, `catastrophic_fail_rate`, `death_rate`, `reason_counts`)
+  - `safety` suite now combines planner smoke + runtime safety metrics (no longer placeholder-only)
+
+## 2.1 Active Execution Priority
+1. Mountain #2: long-horizon planning quality and stability.
+2. Mountain #3: lifelong adaptation under drift after long-horizon changes.
+3. Mountain #7: safety/alignment hardening (catastrophic failure reduction).
+4. Remaining mountains after 1-3 are stabilized.
 
 ## 3. Gate Model (DoD)
 
@@ -81,19 +91,20 @@ Status: complete for current quick 5-seed reference.
 
 ### Phase D (8-mountain completeness)
 Status: in progress.
-- Current blockers are depth/coverage (especially long-horizon, safety/adversarial, rich ToM, stronger multimodality), not only gate math.
+- Long-horizon and safety base suites are now wired into bench.
+- Current blockers are metric quality and multi-seed robustness (especially catastrophic safety outcomes, deep ToM, stronger multimodality), not only gate math.
 
 ## 5. 8-Mountain Matrix (metric -> test -> DoD)
 
 | Mountain | Primary metrics | Required tests | DoD |
 |---|---|---|---|
 | 1. Cross-domain generality | `generalization_score`, per-suite transfer gaps | core/tools/language/social OOD runs | Shared architecture passes OOD tolerances |
-| 2. Long horizon planning | horizon success at 100+ steps, subgoal completion | dedicated long-horizon suite | stable score with bounded variance |
+| 2. Long horizon planning | horizon success at 100+ steps, subgoal completion | dedicated long-horizon suite (implemented) | stable score with bounded variance |
 | 3. Lifelong learning | `forgetting_gap`, `forward_transfer` | lifelong stress suite, replay ablations | no catastrophic forgetting under drift |
 | 4. Language/abstraction | instruction success, causal drop, explanation checks | language in/out-of-distribution tasks | stable instruction execution + auditable reasoning traces |
 | 5. Tools/workflows | unmasked pass rate, steps-to-pass, workflow completion | repo loop and open workflow suites | multi-step code workflow success without mask dependence |
 | 6. Social reasoning | social success/transfer, ToM proxy metrics | social basic + transfer/OOD scenarios | stable cooperation/competition transfer |
-| 7. Safety/alignment | constraint compliance, catastrophic fail rate, anti-hacking score | safety/OOD/adversarial packs | constraints respected across novel settings |
+| 7. Safety/alignment | constraint compliance, catastrophic fail rate, anti-hacking score | safety suite + safety/OOD/adversarial packs | constraints respected across novel settings |
 | 8. Engineering/scale | run reproducibility, CI health, regression rate | smoke/gate/regression pipelines | low-flake reproducible benchmark ops |
 
 ## 6. Public Interfaces (required)
@@ -114,7 +125,7 @@ Status: in progress.
   - gate logic correctness
   - schema `0.2` fields and backward-safe handling
 - Integration:
-  - quick/full: core/tools/tools_open/language/social/lifelong/safety
+  - quick/full: long_horizon/core/tools/tools_open/language/social/lifelong/safety
   - OOD pack for critical suites
 - Regression:
   - baseline commit comparison and degradation guardrails
