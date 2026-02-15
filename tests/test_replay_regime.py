@@ -61,3 +61,29 @@ def test_sample_mixed_always_returns_full_batch():
     )
     assert batch[0].shape[0] == batch_size  # obs_seq
     assert batch[3].shape[0] == batch_size  # r_seq
+
+
+def test_sample_mixed_weighted_past_regimes_prefers_high_weight():
+    buf = ReplayBuffer(capacity=500)
+    for _ in range(80):
+        buf.push(_make_tr("past_low", val=2))
+    for _ in range(80):
+        buf.push(_make_tr("past_high", val=3))
+    for _ in range(80):
+        buf.push(_make_tr("current", val=1))
+
+    batch = buf.sample_mixed(
+        batch_size=200,
+        seq_len=1,
+        mix_config={
+            "current_regime": "current",
+            "frac_current": 0.0,
+            "past_regime_weights": {"past_low": 0.1, "past_high": 10.0},
+            "sampling_temperature": 0.5,
+        },
+        with_events=False,
+    )
+    rewards = batch[3].reshape(-1)
+    low_count = int((rewards == 2.0).sum())
+    high_count = int((rewards == 3.0).sum())
+    assert high_count > low_count
