@@ -1,21 +1,26 @@
 ﻿# ROADMAP v2: Gate-Driven AGI-Ready Program
 
-Updated: 2026-02-12
+Updated: 2026-02-15
 
 ## 1. Goal
-- Move from current baseline (`Gate0=pass`, `Gate1=pass`, `Gate2=fail`) to a reproducible AGI-ready contour with measurable criteria across all 8 technical mountains.
-- Prioritize proof-by-evaluation: stable gates, multi-seed robustness, OOD checks, and capability-level metrics.
+- Maintain a reproducible AGI-ready research contour with measurable criteria across all 8 technical mountains.
+- Keep proof-by-evaluation as the governing rule: stable gates, multi-seed robustness, OOD checks, and capability metrics.
 
-## 2. Baseline Snapshot
-- Baseline reference report: `reports/agi_v1.quick.post_lifelong_replay05.seed0.json`.
-- Known blockers on Gate2 path:
-  - `core.score < 0.90`
-  - `tools.pass_rate_unmasked < 0.85`
-  - `language.pass_rate < 0.70`
-- Already near/at threshold in baseline:
-  - `tools.mean_steps_to_pass_unmasked <= 10`
-  - social metrics above Gate2 thresholds
-  - lifelong metrics above Gate2 thresholds
+## 2. Current Snapshot (Fact)
+- Primary reference report: `reports/agi_v1.quick.seed01234.stab2.json`.
+- Current gates:
+  - `gate0=pass`
+  - `gate1=pass`
+  - `gate2=pass`
+  - `gate3=pass`
+  - `gate4=fail`
+- Gate4 blocker:
+  - `overall.confidence = 0.7846` (< `0.80`).
+- Capability vector (already above thresholds):
+  - `generalization_score = 0.8314`
+  - `sample_efficiency_score = 0.8548`
+  - `robustness_score = 0.8864`
+  - `tool_workflow_score = 0.95`
 
 ## 3. Gate Model (DoD)
 
@@ -57,40 +62,26 @@ Pass conditions:
   - `tool_workflow_score >= 0.80`
 - `overall.confidence >= 0.80`
 
-## 4. Phase Plan
+## 4. Phase Plan and Status
 
-### Phase A (1 week): Reproducibility hygiene
-- Standardized artifact naming and temporary-file policy.
-- Report manifest discipline (`commit`, `config_hash`, `seed_list`, environment fingerprint).
-- Stable multi-seed smoke in local/CI checks.
-Exit criteria:
-- repeated quick/full runs reproducible within agreed tolerance on seeds `0,1,2`.
+### Phase A (Reproducibility hygiene)
+Status: mostly complete, keep regression discipline.
+- Report manifest discipline implemented (`config_hash`, `seed_list`, environment fingerprint).
+- Remaining: keep rerun discipline and reduce flakiness in heavy suites.
 
-### Phase B (1-3 weeks): Close Gate2
-- Tools:
-  - targeted tuning for repo-loop settings (BC schedule, replay, mask dropout).
-  - internalization metrics tracked (`invalid_mass` trend, masked/unmasked divergence).
-- Language:
-  - increase instruction-signal budget.
-  - enforce consistent aggregation of success rate vs return.
-- Core:
-  - improve quick/full stability and MiniGrid readiness.
-  - preserve optional dependency fallback behavior.
-Exit criteria:
-- `python bench.py --suite agi_v1 --quick --seeds 0,1,2` gives `Gate2=pass` in at least two repeated runs.
+### Phase B (Close Gate2)
+Status: complete on current quick 5-seed reference.
+- Tools/language/core tuning integrated.
+- Lifelong and social thresholds hold on current reference.
 
-### Phase C (2-4 weeks): Close Gate3
-- Move from single-pass to robust capability pass.
-- Enforce 5-seed stability plus OOD pack checks.
-- Track capability vector as first-class output.
-Exit criteria:
-- Gate3 pass under documented thresholds.
+### Phase C (Close Gate3)
+Status: complete for current quick 5-seed reference.
+- CI thresholds met for all Gate3 suites.
+- Remaining hardening: independent rerun confirmation and full+OOD parity.
 
-### Phase D (1-3 months): Close all 8 mountains in-repo
-- Add required tests/metrics/thresholds per mountain.
-- Automate pass/fail in bench pipeline.
-Exit criteria:
-- full matrix coverage and automatic validation.
+### Phase D (8-mountain completeness)
+Status: in progress.
+- Current blockers are depth/coverage (especially long-horizon, safety/adversarial, rich ToM, stronger multimodality), not only gate math.
 
 ## 5. 8-Mountain Matrix (metric -> test -> DoD)
 
@@ -115,15 +106,13 @@ Exit criteria:
 - `trainer.py`:
   - structured stability/internalization/planning metrics
   - episode-level trace export for analysis
-- `repo_tool_env.py`:
-  - protocol extension for longer workflow action chains
 - `ROADMAP.md`, `ROADMAP_v2.md`, `CHECKLIST.md`:
   - synced DoD, commands, acceptance criteria
 
 ## 7. Mandatory Test Packs
 - Unit:
   - gate logic correctness
-  - schema 0.2 fields and backward-safe handling
+  - schema `0.2` fields and backward-safe handling
 - Integration:
   - quick/full: core/tools/tools_open/language/social/lifelong/safety
   - OOD pack for critical suites
