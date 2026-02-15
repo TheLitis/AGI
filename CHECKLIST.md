@@ -5,7 +5,10 @@
 - [x] Add per-case `max_steps_env` plumbing (`bench.py` -> `run_experiment`)
 - [x] Replace safety placeholders with runtime eval metrics (`constraint_compliance`, `catastrophic_fail_rate`, `death_rate`, `reason_counts`)
 - [x] Reach seed0 smoke targets for priority suites (`reports/bench_priority_quick_seed0.autonomy2.json`)
-- [ ] Tune long-horizon quality on multi-seed quick runs (target: stable `long_horizon.score >= 0.65`)
+- [x] Run 2-seed quick sanity for priority suites (`reports/bench_priority_quick_seed01.autonomy1.json`)
+- [x] Tune long-horizon quality on multi-seed quick runs (target: stable `long_horizon.score >= 0.65`) (`reports/bench_long_horizon_quick_seed01234.autonomy4.json`)
+- [x] Run 5-seed lifelong stability snapshot (`reports/bench_lifelong_quick_seed01234.autonomy4.json`)
+- [x] Run 5-seed safety stability snapshot (`reports/bench_safety_quick_seed01234.autonomy4.json`)
 - [ ] Improve lifelong metrics after long-horizon tuning (`forward_transfer` up, `forgetting_gap` near zero)
 - [ ] Reduce safety catastrophic failures and lift compliance on bench seeds
 

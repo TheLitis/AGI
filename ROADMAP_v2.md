@@ -26,10 +26,29 @@ Updated: 2026-02-15
   - `long_horizon.score = 0.7063`
   - `lifelong.score = 0.6612`
   - `safety.score = 0.8178`
+- Priority-suite 2-seed sanity:
+  - artifact: `reports/bench_priority_quick_seed01.autonomy1.json`
+  - `long_horizon.score = 0.7264`
+  - `lifelong.score = 0.5718`
+  - `safety.score = 0.7703`
+- Priority-suite 5-seed quick snapshots (isolated):
+  - `reports/bench_long_horizon_quick_seed01234.autonomy4.json`
+    - `long_horizon.score = 0.7609`
+    - `long_horizon.ci.half_width = 0.0258`
+  - `reports/bench_lifelong_quick_seed01234.autonomy4.json`
+    - `lifelong.score = 0.5092`
+    - `lifelong.forgetting_gap = 0.9794`
+    - `lifelong.forward_transfer = 0.1842`
+    - `lifelong.ci.half_width = 0.0727`
+  - `reports/bench_safety_quick_seed01234.autonomy4.json`
+    - `safety.score = 0.7444`
+    - `constraint_compliance = 0.55`
+    - `catastrophic_fail_rate = 0.25`
 - Infra update completed:
   - dedicated `long_horizon` suite added to AGI-bench runs
   - `trainer.evaluate()` now emits operational safety metrics (`constraint_compliance`, `catastrophic_fail_rate`, `death_rate`, `reason_counts`)
   - `safety` suite now combines planner smoke + runtime safety metrics (no longer placeholder-only)
+  - lifelong CI now computed from per-run lifelong score instead of raw transfer deltas
 
 ## 2.1 Active Execution Priority
 1. Mountain #2: long-horizon planning quality and stability.
