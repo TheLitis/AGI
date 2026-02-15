@@ -3220,6 +3220,196 @@ class Trainer:
         else:
             raise ValueError(f"Unknown planner_mode: {self.planner_mode}")
 
+    def _planner_reliability(
+        self,
+        policy_logits: torch.Tensor,
+        planner_logits: torch.Tensor,
+        uncertainty: Optional[torch.Tensor] = None,
+        r_self: Optional[torch.Tensor] = None,
+        v_pi: Optional[torch.Tensor] = None,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Reliability estimate for planner guidance.
+        rel = sigmoid(1.5*margin) * exp(-js) * exp(-0.7*u) * exp(-0.7*c)
+          margin: top1-top2 planner logit margin
+          js: Jensen-Shannon divergence between policy/planner distributions
+          u: mean uncertainty
+          c: mean |R_self - V_pi|
+        """
+        if policy_logits.dim() == 1:
+            policy_logits = policy_logits.unsqueeze(0)
+        if planner_logits.dim() == 1:
+            planner_logits = planner_logits.unsqueeze(0)
+        batch = int(policy_logits.shape[0]) if policy_logits.dim() >= 2 else 1
+        device = policy_logits.device
+        dtype = policy_logits.dtype
+
+        zeros = torch.zeros(batch, device=device, dtype=dtype)
+        out: Dict[str, torch.Tensor] = {
+            "reliability": zeros.clone(),
+            "margin": zeros.clone(),
+            "js": zeros.clone(),
+            "valid_mask": torch.zeros(batch, device=device, dtype=torch.bool),
+        }
+        if planner_logits.shape != policy_logits.shape or policy_logits.dim() != 2:
+            return out
+
+        policy_det = policy_logits.detach()
+        planner_det = planner_logits.detach()
+        valid_mask = torch.isfinite(policy_det).all(dim=-1) & torch.isfinite(planner_det).all(dim=-1)
+        if not bool(valid_mask.any().item()):
+            return out
+
+        policy_v = policy_det[valid_mask]
+        planner_v = planner_det[valid_mask]
+        p = torch.softmax(policy_v, dim=-1)
+        q = torch.softmax(planner_v, dim=-1)
+        m = 0.5 * (p + q)
+        eps = torch.tensor(1.0e-8, device=device, dtype=dtype)
+        kl_pm = torch.sum(p * (torch.log(p + eps) - torch.log(m + eps)), dim=-1)
+        kl_qm = torch.sum(q * (torch.log(q + eps) - torch.log(m + eps)), dim=-1)
+        js_v = 0.5 * (kl_pm + kl_qm)
+
+        n_actions = int(policy_logits.shape[-1])
+        if n_actions > 1:
+            top_vals = torch.topk(planner_v, k=2, dim=-1).values
+            margin_v = top_vals[:, 0] - top_vals[:, 1]
+        else:
+            margin_v = planner_v[:, 0]
+
+        u_v = torch.zeros_like(js_v)
+        if isinstance(uncertainty, torch.Tensor):
+            unc_det = uncertainty.detach()
+            if unc_det.dim() == 0:
+                unc_det = unc_det.view(1)
+            if unc_det.dim() > 1:
+                unc_det = unc_det.reshape(unc_det.shape[0], -1).mean(dim=-1)
+            if unc_det.shape[0] == 1 and batch > 1:
+                unc_det = unc_det.expand(batch)
+            if unc_det.shape[0] == batch:
+                unc_valid = unc_det[valid_mask].to(device=device, dtype=dtype)
+                unc_valid = torch.nan_to_num(unc_valid, nan=0.0, posinf=0.0, neginf=0.0)
+                u_v = torch.clamp(unc_valid, min=0.0)
+
+        c_v = torch.zeros_like(js_v)
+        if isinstance(r_self, torch.Tensor) and isinstance(v_pi, torch.Tensor):
+            conf_det = torch.abs(r_self.detach() - v_pi.detach())
+            if conf_det.dim() == 0:
+                conf_det = conf_det.view(1)
+            if conf_det.dim() > 1:
+                conf_det = conf_det.reshape(conf_det.shape[0], -1).mean(dim=-1)
+            if conf_det.shape[0] == 1 and batch > 1:
+                conf_det = conf_det.expand(batch)
+            if conf_det.shape[0] == batch:
+                conf_valid = conf_det[valid_mask].to(device=device, dtype=dtype)
+                conf_valid = torch.nan_to_num(conf_valid, nan=0.0, posinf=0.0, neginf=0.0)
+                c_v = torch.clamp(conf_valid, min=0.0)
+
+        rel_v = torch.sigmoid(1.5 * margin_v) * torch.exp(-1.0 * js_v) * torch.exp(-0.7 * u_v) * torch.exp(-0.7 * c_v)
+        rel_v = torch.clamp(rel_v, min=0.0, max=1.0)
+
+        out["reliability"][valid_mask] = rel_v
+        out["margin"][valid_mask] = margin_v
+        out["js"][valid_mask] = js_v
+        out["valid_mask"] = valid_mask
+        return out
+
+    def _blend_with_planner(
+        self,
+        policy_logits: torch.Tensor,
+        planner_logits: Optional[torch.Tensor],
+        base_planning_coef: float,
+        uncertainty: Optional[torch.Tensor] = None,
+        r_self: Optional[torch.Tensor] = None,
+        v_pi: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        """
+        Reliability-adaptive blending of policy and planner logits.
+        """
+        try:
+            base = float(base_planning_coef)
+        except Exception:
+            base = 0.0
+        base = max(0.0, min(1.0, base))
+        info = {
+            "planner_alpha": 0.0,
+            "planner_margin": 0.0,
+            "planner_js": 0.0,
+            "planner_override": 0.0,
+        }
+        if base <= 0.0 or not isinstance(planner_logits, torch.Tensor):
+            return policy_logits, info
+
+        reliab = self._planner_reliability(
+            policy_logits=policy_logits,
+            planner_logits=planner_logits,
+            uncertainty=uncertainty,
+            r_self=r_self,
+            v_pi=v_pi,
+        )
+        valid_mask = reliab.get("valid_mask")
+        if not isinstance(valid_mask, torch.Tensor) or not bool(valid_mask.any().item()):
+            return policy_logits, info
+
+        rel = reliab["reliability"]
+        alpha = torch.clamp(rel * base, min=0.0, max=base)
+        blended = policy_logits.clone()
+        blended[valid_mask] = (
+            (1.0 - alpha[valid_mask].unsqueeze(-1)) * policy_logits[valid_mask]
+            + alpha[valid_mask].unsqueeze(-1) * planner_logits[valid_mask]
+        )
+
+        policy_argmax = torch.argmax(policy_logits.detach(), dim=-1)
+        planner_argmax = torch.argmax(planner_logits.detach(), dim=-1)
+        override = (
+            (policy_argmax != planner_argmax).to(policy_logits.dtype)
+            * (alpha > 1.0e-6).to(policy_logits.dtype)
+        )
+
+        alpha_valid = alpha[valid_mask]
+        margin_valid = reliab["margin"][valid_mask]
+        js_valid = reliab["js"][valid_mask]
+        override_valid = override[valid_mask]
+        info = {
+            "planner_alpha": float(alpha_valid.mean().item()) if alpha_valid.numel() else 0.0,
+            "planner_margin": float(margin_valid.mean().item()) if margin_valid.numel() else 0.0,
+            "planner_js": float(js_valid.mean().item()) if js_valid.numel() else 0.0,
+            "planner_override": float(override_valid.mean().item()) if override_valid.numel() else 0.0,
+        }
+        return blended, info
+
+    def _planner_debug_summary(
+        self,
+        alpha_values: List[float],
+        js_values: List[float],
+        margin_values: List[float],
+        override_values: List[float],
+    ) -> Dict[str, float]:
+        def _clean(values: List[float]) -> List[float]:
+            out: List[float] = []
+            for v in values:
+                if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                    out.append(float(v))
+            return out
+
+        alpha = np.asarray(_clean(alpha_values), dtype=np.float32)
+        js = np.asarray(_clean(js_values), dtype=np.float32)
+        margin = np.asarray(_clean(margin_values), dtype=np.float32)
+        override = np.asarray(_clean(override_values), dtype=np.float32)
+
+        alpha_mean = float(alpha.mean()) if alpha.size else 0.0
+        alpha_p90 = float(np.percentile(alpha, 90.0)) if alpha.size else 0.0
+        js_mean = float(js.mean()) if js.size else 0.0
+        margin_mean = float(margin.mean()) if margin.size else 0.0
+        override_rate = float(override.mean()) if override.size else 0.0
+        return {
+            "planner_alpha_mean": alpha_mean,
+            "planner_alpha_p90": alpha_p90,
+            "planner_js_mean": js_mean,
+            "planner_margin_mean": margin_mean,
+            "planner_override_rate": override_rate,
+        }
+
     def _total_skill_count(self) -> int:
         latent_count = len(self.skill_library) if self.skill_library is not None else 0
         return len(self.skills) + latent_count
@@ -3593,6 +3783,10 @@ class Trainer:
 
         step_idx = 0
         planner_used_steps = 0
+        planner_alpha_vals: List[float] = []
+        planner_js_vals: List[float] = []
+        planner_margin_vals: List[float] = []
+        planner_override_vals: List[float] = []
         patch_shape = patch_np.shape
 
         skill_state = {
@@ -3773,8 +3967,20 @@ class Trainer:
                             traits=traits,
                             M=M,
                         )
-                    planner_used_steps += 1
-                    logits_raw = (1.0 - planning_coef) * logits_raw + planning_coef * planner_logits
+                    logits_raw, planner_debug = self._blend_with_planner(
+                        policy_logits=logits_raw,
+                        planner_logits=planner_logits,
+                        base_planning_coef=float(planning_coef),
+                        uncertainty=U_t if use_self else None,
+                        r_self=R_self if use_self else None,
+                        v_pi=V_pi if use_self else None,
+                    )
+                    planner_alpha_vals.append(float(planner_debug.get("planner_alpha", 0.0)))
+                    planner_js_vals.append(float(planner_debug.get("planner_js", 0.0)))
+                    planner_margin_vals.append(float(planner_debug.get("planner_margin", 0.0)))
+                    planner_override_vals.append(float(planner_debug.get("planner_override", 0.0)))
+                    if float(planner_debug.get("planner_alpha", 0.0)) > 1.0e-6:
+                        planner_used_steps += 1
                 logits_for_online_bc = logits_raw
 
                 mask = self._get_action_mask_for_logits(logits_raw)
@@ -3951,6 +4157,12 @@ class Trainer:
         self.last_planner_usage_steps = int(planner_used_steps)
         self.last_planner_total_steps = int(step_idx)
         self.last_planner_usage_frac = float(planner_used_steps) / float(max(1, step_idx))
+        self.last_planner_debug = self._planner_debug_summary(
+            alpha_values=planner_alpha_vals,
+            js_values=planner_js_vals,
+            margin_values=planner_margin_vals,
+            override_values=planner_override_vals,
+        )
 
         return (
             actions_t,
@@ -4541,6 +4753,14 @@ class Trainer:
         meta_conflict_ma = float(self.meta_conflict_ma)
         meta_uncertainty_ma = float(self.meta_uncertainty_ma)
         planner_usage_frac = float(getattr(self, "last_planner_usage_frac", 0.0))
+        planner_debug = getattr(self, "last_planner_debug", {})
+        if not isinstance(planner_debug, dict):
+            planner_debug = {}
+        planner_alpha_mean = float(planner_debug.get("planner_alpha_mean", 0.0) or 0.0)
+        planner_alpha_p90 = float(planner_debug.get("planner_alpha_p90", 0.0) or 0.0)
+        planner_js_mean = float(planner_debug.get("planner_js_mean", 0.0) or 0.0)
+        planner_margin_mean = float(planner_debug.get("planner_margin_mean", 0.0) or 0.0)
+        planner_override_rate = float(planner_debug.get("planner_override_rate", 0.0) or 0.0)
         entropy_eff = stats.get("entropy_coef_eff", entropy_coef)
         mean_invalid_mass = float(stats.get("mean_invalid_action_mass", 0.0))
         mask_pred_f1 = stats.get("mask_pred_f1", float("nan"))
@@ -4555,7 +4775,9 @@ class Trainer:
             f"meta_conflict_ma={meta_conflict_ma:.4f}, meta_uncertainty_ma={meta_uncertainty_ma:.4f} | "
             f"entropy_coef_eff={entropy_eff:.5f}, curiosity_beta_eff={cur_beta_eff:.5f}, "
             f"planning_coef_eff={planning_coef_eff:.5f}, gae_lambda_eff={gae_lambda_eff:.4f}, "
-            f"planner_usage_frac={planner_usage_frac:.3f} | "
+            f"planner_usage_frac={planner_usage_frac:.3f}, planner_alpha_mean={planner_alpha_mean:.3f}, "
+            f"planner_alpha_p90={planner_alpha_p90:.3f}, planner_js_mean={planner_js_mean:.3f}, "
+            f"planner_margin_mean={planner_margin_mean:.3f}, planner_override_rate={planner_override_rate:.3f} | "
             f"beta_conflict={beta_conflict:.3f}, beta_uncertainty={beta_uncertainty:.3f}, "
             f"mask_pred_f1={mask_pred_f1:.3f}, mask_pred_auc={mask_pred_auc:.3f}, "
             f"online_bc_loss={online_bc_loss:.4f}, online_bc_samples={online_bc_samples:.0f}"
@@ -5407,6 +5629,10 @@ class Trainer:
             social_success_flags: List[bool] = []
             social_success_flags_train: List[bool] = []
             social_success_flags_test: List[bool] = []
+            planner_alpha_vals: List[float] = []
+            planner_js_vals: List[float] = []
+            planner_margin_vals: List[float] = []
+            planner_override_vals: List[float] = []
 
             for _ in range(n_episodes):
                 obs = self.env.reset()
@@ -5574,7 +5800,18 @@ class Trainer:
                                     traits=traits,
                                     M=M,
                                 )
-                                logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
+                                logits, planner_debug = self._blend_with_planner(
+                                    policy_logits=logits,
+                                    planner_logits=planner_logits,
+                                    base_planning_coef=float(planning_coef),
+                                    uncertainty=U_t if split_use_self else None,
+                                    r_self=R_self if split_use_self else None,
+                                    v_pi=V_pi if split_use_self else None,
+                                )
+                                planner_alpha_vals.append(float(planner_debug.get("planner_alpha", 0.0)))
+                                planner_js_vals.append(float(planner_debug.get("planner_js", 0.0)))
+                                planner_margin_vals.append(float(planner_debug.get("planner_margin", 0.0)))
+                                planner_override_vals.append(float(planner_debug.get("planner_override", 0.0)))
 
                             mask = self._get_action_mask_for_logits(logits)
                             logits = self._compose_policy_logits_with_masks(
@@ -5848,6 +6085,13 @@ class Trainer:
                 "test_mean_return": test_mean,
                 "test_std_return": test_std,
             }
+            planner_summary = self._planner_debug_summary(
+                alpha_values=planner_alpha_vals,
+                js_values=planner_js_vals,
+                margin_values=planner_margin_vals,
+                override_values=planner_override_vals,
+            )
+            metrics.update(planner_summary)
             if per_task_stats:
                 metrics["per_task"] = per_task_stats
             if repo_pass_flags:
@@ -5955,6 +6199,10 @@ class Trainer:
         foods: List[int] = []
         damages: List[int] = []
         episode_returns: List[float] = []
+        planner_alpha_vals: List[float] = []
+        planner_js_vals: List[float] = []
+        planner_margin_vals: List[float] = []
+        planner_override_vals: List[float] = []
         reflection_step_norms: List[float] = []
         reflection_steps_total = 0
         step_size_reflect_base = float(lr)
@@ -6060,7 +6308,18 @@ class Trainer:
                             traits=traits,
                             M=M,
                         )
-                        logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
+                        logits, planner_debug = self._blend_with_planner(
+                            policy_logits=logits,
+                            planner_logits=planner_logits,
+                            base_planning_coef=float(planning_coef),
+                            uncertainty=U_t if use_self else None,
+                            r_self=R_self if use_self else None,
+                            v_pi=V_pi if use_self else None,
+                        )
+                        planner_alpha_vals.append(float(planner_debug.get("planner_alpha", 0.0)))
+                        planner_js_vals.append(float(planner_debug.get("planner_js", 0.0)))
+                        planner_margin_vals.append(float(planner_debug.get("planner_margin", 0.0)))
+                        planner_override_vals.append(float(planner_debug.get("planner_override", 0.0)))
 
                     logits = self._apply_action_mask(logits)
                     dist = Categorical(logits=logits)
@@ -6192,6 +6451,12 @@ class Trainer:
             "steps": int(reflection_steps_total),
             "mean_step_norm": mean_step_norm,
         }
+        planner_summary = self._planner_debug_summary(
+            alpha_values=planner_alpha_vals,
+            js_values=planner_js_vals,
+            margin_values=planner_margin_vals,
+            override_values=planner_override_vals,
+        )
         self.trait_reflection_debug[f"online_{phase_label}"] = online_debug
         self.apply_safe_trait_update(self.agent, self._main_traits().detach().clone(), phase="phaseC", finalize=True)
         weights_after = get_faction_preference_weights(self.agent)
@@ -6228,6 +6493,7 @@ class Trainer:
             "traits_before": traits_before,
             "traits_after": traits_after,
             "trait_reflection_debug": online_debug,
+            **planner_summary,
         }
 
     # =========================
@@ -6658,6 +6924,14 @@ class Trainer:
         baseline_regime_perf: Dict[str, float] = {}
         per_chapter: List[Dict[str, Any]] = []
         trait_stats: Dict[str, Dict[str, Any]] = {}
+        planner_alpha_vals_all: List[float] = []
+        planner_js_vals_all: List[float] = []
+        planner_margin_vals_all: List[float] = []
+        planner_override_vals_all: List[float] = []
+        planner_alpha_vals_all: List[float] = []
+        planner_js_vals_all: List[float] = []
+        planner_margin_vals_all: List[float] = []
+        planner_override_vals_all: List[float] = []
 
         def _adaptation_delta(values: List[float]) -> Optional[float]:
             if len(values) < 2:
@@ -6701,6 +6975,10 @@ class Trainer:
             chapter_uncertainty: List[float] = []
             scenario_counts: Dict[str, int] = {}
             chapter_transitions: List[Transition] = []
+            planner_alpha_vals_ch: List[float] = []
+            planner_js_vals_ch: List[float] = []
+            planner_margin_vals_ch: List[float] = []
+            planner_override_vals_ch: List[float] = []
 
             for _ in range(episodes_per_chapter):
                 scenario_id = self._sample_scenario_for_regime(regime, scenario_map)
@@ -6849,7 +7127,18 @@ class Trainer:
                                     traits=traits,
                                     M=M,
                                 )
-                                logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
+                                logits, planner_debug = self._blend_with_planner(
+                                    policy_logits=logits,
+                                    planner_logits=planner_logits,
+                                    base_planning_coef=float(planning_coef),
+                                    uncertainty=U_t if use_self_flag else None,
+                                    r_self=R_self if use_self_flag else None,
+                                    v_pi=V_pi if use_self_flag else None,
+                                )
+                                planner_alpha_vals_ch.append(float(planner_debug.get("planner_alpha", 0.0)))
+                                planner_js_vals_ch.append(float(planner_debug.get("planner_js", 0.0)))
+                                planner_margin_vals_ch.append(float(planner_debug.get("planner_margin", 0.0)))
+                                planner_override_vals_ch.append(float(planner_debug.get("planner_override", 0.0)))
 
                             logits = self._apply_action_mask(logits)
                             dist = Categorical(logits=logits)
@@ -7054,6 +7343,16 @@ class Trainer:
                 for tr in chapter_transitions:
                     self.lifelong_buffer.push(tr)
 
+            chapter_planner_summary = self._planner_debug_summary(
+                alpha_values=planner_alpha_vals_ch,
+                js_values=planner_js_vals_ch,
+                margin_values=planner_margin_vals_ch,
+                override_values=planner_override_vals_ch,
+            )
+            planner_alpha_vals_all.extend(planner_alpha_vals_ch)
+            planner_js_vals_all.extend(planner_js_vals_ch)
+            planner_margin_vals_all.extend(planner_margin_vals_ch)
+            planner_override_vals_all.extend(planner_override_vals_ch)
             per_chapter.append(
                 {
                     "regime": regime.name,
@@ -7074,6 +7373,7 @@ class Trainer:
                         "last_policy_loss": float(policy_losses[-1]) if policy_losses else None,
                         "last_self_model_loss": float(self_losses[-1]) if self_losses else None,
                     },
+                    "planner_debug": chapter_planner_summary,
                 }
             )
 
@@ -7132,6 +7432,14 @@ class Trainer:
                 "gap": forgetting_per_regime,
             },
         }
+        metrics.update(
+            self._planner_debug_summary(
+                alpha_values=planner_alpha_vals_all,
+                js_values=planner_js_vals_all,
+                margin_values=planner_margin_vals_all,
+                override_values=planner_override_vals_all,
+            )
+        )
         trait_reflection_debug: Dict[str, Any] = {}
         for regime in schedule:
             regime_name = regime.name
@@ -7261,6 +7569,10 @@ class Trainer:
             chapter_survival: List[float] = []
             chapter_uncertainty: List[float] = []
             scenario_counts: Dict[str, int] = {}
+            planner_alpha_vals_ch: List[float] = []
+            planner_js_vals_ch: List[float] = []
+            planner_margin_vals_ch: List[float] = []
+            planner_override_vals_ch: List[float] = []
             scenario_plan = self._build_episode_scenario_plan(
                 regime=regime,
                 name_to_id=scenario_map,
@@ -7405,7 +7717,18 @@ class Trainer:
                                 traits=traits,
                                 M=M,
                             )
-                            logits = (1.0 - planning_coef) * logits + planning_coef * planner_logits
+                            logits, planner_debug = self._blend_with_planner(
+                                policy_logits=logits,
+                                planner_logits=planner_logits,
+                                base_planning_coef=float(planning_coef),
+                                uncertainty=U_t if use_self_flag else None,
+                                r_self=R_self if use_self_flag else None,
+                                v_pi=V_pi if use_self_flag else None,
+                            )
+                            planner_alpha_vals_ch.append(float(planner_debug.get("planner_alpha", 0.0)))
+                            planner_js_vals_ch.append(float(planner_debug.get("planner_js", 0.0)))
+                            planner_margin_vals_ch.append(float(planner_debug.get("planner_margin", 0.0)))
+                            planner_override_vals_ch.append(float(planner_debug.get("planner_override", 0.0)))
 
                         logits = self._apply_action_mask(logits)
                         if eval_policy_norm == "greedy":
@@ -7567,6 +7890,16 @@ class Trainer:
                 baseline_return=baseline_val,
                 move_counts=chapter_lengths,
             )
+            chapter_planner_summary = self._planner_debug_summary(
+                alpha_values=planner_alpha_vals_ch,
+                js_values=planner_js_vals_ch,
+                margin_values=planner_margin_vals_ch,
+                override_values=planner_override_vals_ch,
+            )
+            planner_alpha_vals_all.extend(planner_alpha_vals_ch)
+            planner_js_vals_all.extend(planner_js_vals_ch)
+            planner_margin_vals_all.extend(planner_margin_vals_ch)
+            planner_override_vals_all.extend(planner_override_vals_ch)
             per_chapter.append(
                 {
                     "regime": regime.name,
@@ -7581,6 +7914,7 @@ class Trainer:
                     "description": regime.description,
                     "returns": [float(x) for x in chapter_returns],
                     "scenario_counts": scenario_counts,
+                    "planner_debug": chapter_planner_summary,
                 }
             )
 
@@ -7620,6 +7954,14 @@ class Trainer:
             "prior_traits": prior_traits.detach().cpu().numpy().flatten().tolist(),
             "final_traits": current_traits.detach().cpu().numpy().flatten().tolist(),
         }
+        metrics.update(
+            self._planner_debug_summary(
+                alpha_values=planner_alpha_vals_all,
+                js_values=planner_js_vals_all,
+                margin_values=planner_margin_vals_all,
+                override_values=planner_override_vals_all,
+            )
+        )
         trait_reflection_debug: Dict[str, Any] = {}
         for regime in schedule:
             regime_name = regime.name
