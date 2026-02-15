@@ -7,20 +7,22 @@ Updated: 2026-02-15
 - Keep proof-by-evaluation as the governing rule: stable gates, multi-seed robustness, OOD checks, and capability metrics.
 
 ## 2. Current Snapshot (Fact)
-- Primary reference report: `reports/agi_v1.quick.seed01234.stab2.json`.
+- Primary reference report: `reports/agi_v1.quick.seed0.codex_audit.json`.
 - Current gates:
-  - `gate0=pass`
-  - `gate1=pass`
-  - `gate2=pass`
-  - `gate3=pass`
+  - `gate0=fail`
+  - `gate1=fail`
+  - `gate2=fail`
+  - `gate3=fail`
   - `gate4=fail`
-- Gate4 blocker:
-  - `overall.confidence = 0.7846` (< `0.80`).
+- Current blockers:
+  - `core` suite runtime error: `OSError: [Errno 22] Invalid argument`
+  - `language` suite runtime error: `OSError: [Errno 22] Invalid argument`
+  - `overall.confidence = 0.6381` (< `0.80`)
 - Capability vector (already above thresholds):
-  - `generalization_score = 0.8314`
-  - `sample_efficiency_score = 0.8548`
-  - `robustness_score = 0.8864`
-  - `tool_workflow_score = 0.95`
+  - `generalization_score = 0.9701`
+  - `sample_efficiency_score = 1.0000`
+  - `robustness_score = 0.9266`
+  - `tool_workflow_score = 0.9167`
 - Priority-suite seed0 smoke after infrastructure/tuning:
   - artifact: `reports/bench_priority_quick_seed0.autonomy2.json`
   - `long_horizon.score = 0.7063`
@@ -44,6 +46,8 @@ Updated: 2026-02-15
     - `safety.score = 0.7444`
     - `constraint_compliance = 0.55`
     - `catastrophic_fail_rate = 0.25`
+- Note:
+  - priority-suite snapshots above are directional diagnostics and not the canonical validated AGI reference.
 - Infra update completed:
   - dedicated `long_horizon` suite added to AGI-bench runs
   - `trainer.evaluate()` now emits operational safety metrics (`constraint_compliance`, `catastrophic_fail_rate`, `death_rate`, `reason_counts`)
@@ -104,14 +108,14 @@ Status: mostly complete, keep regression discipline.
 - Remaining: keep rerun discipline and reduce flakiness in heavy suites.
 
 ### Phase B (Close Gate2)
-Status: complete on current quick 5-seed reference.
-- Tools/language/core tuning integrated.
-- Lifelong and social thresholds hold on current reference.
+Status: not confirmed on the current validated baseline.
+- Historical tuning artifacts indicate prior Gate2-level performance, but the current canonical baseline has `gate0=fail`.
+- Immediate requirement: fix `core/language` runtime errors, then regenerate validated multi-seed AGI quick baseline.
 
 ### Phase C (Close Gate3)
-Status: complete for current quick 5-seed reference.
-- CI thresholds met for all Gate3 suites.
-- Remaining hardening: independent rerun confirmation and full+OOD parity.
+Status: not confirmed on the current validated baseline.
+- Gate3 cannot be claimed while `gate0/gate2` are failing on the canonical validated baseline.
+- Remaining requirement: re-establish Gate2 first, then re-check CI thresholds on validated multi-seed runs.
 
 ### Phase D (8-mountain completeness)
 Status: in progress.

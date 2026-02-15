@@ -15,11 +15,13 @@
 ## A) Verified Current State
 - [x] Verify gate/schema unit tests: `python -m pytest tests/test_bench_gates.py tests/test_agi_bench_report.py tests/test_bench_scoring.py -q`
 - [x] Verify full test suite health: `python -m pytest -q`
-- [x] Produce 5-seed AGI quick reference report: `reports/agi_v1.quick.seed01234.stab2.json`
-- [x] Confirm `gate2 == pass` on reference report
-- [x] Confirm `gate3 == pass` on reference report
-- [x] Confirm `gate4 == fail` and blocker is `overall.confidence < 0.80`
+- [x] Produce seed0 AGI quick reference report: `reports/agi_v1.quick.seed0.codex_audit.json`
+- [x] Validate reference report structure: `python validate_bench_report.py --report reports/agi_v1.quick.seed0.codex_audit.json`
+- [x] Confirm `gate0 == fail` on reference report
+- [x] Confirm `gate2/gate3` are not confirmed on the current validated baseline
+- [x] Confirm `gate0` failure is driven by suite runtime errors (`core/language` with `OSError: [Errno 22] Invalid argument`)
 - [x] Confirm capability vector thresholds are met (`generalization/sample_efficiency/robustness/tool_workflow`)
+- [ ] Regenerate validated multi-seed AGI quick reference (`seeds 0..4`) after core/language runtime fix
 
 ## B) Gate4 Close Tasks (Operational)
 - [ ] Reproduce independent rerun #2: `python bench.py --suite agi_v1 --quick --seeds 0,1,2,3,4 --report reports/agi_v1.quick.seed01234.rerun2.json`

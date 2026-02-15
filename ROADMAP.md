@@ -5,10 +5,12 @@ Updated: 2026-02-15
 Source of truth: `ROADMAP_v2.md`.
 
 ## Current Stage
-- Primary reference: `reports/agi_v1.quick.seed01234.stab2.json`.
-- Current gates: `gate0=pass`, `gate1=pass`, `gate2=pass`, `gate3=pass`, `gate4=fail`.
-- Immediate blocker to Gate4:
-  - `overall.confidence = 0.7846` (threshold: `>= 0.80`).
+- Primary reference: `reports/agi_v1.quick.seed0.codex_audit.json`.
+- Current gates: `gate0=fail`, `gate1=fail`, `gate2=fail`, `gate3=fail`, `gate4=fail`.
+- Immediate blockers:
+  - `core` suite runtime failure: `OSError: [Errno 22] Invalid argument`.
+  - `language` suite runtime failure: `OSError: [Errno 22] Invalid argument`.
+  - `overall.confidence = 0.6381` (below Gate4 threshold `>= 0.80`).
 
 ## Active Priority Order
 1. Long-horizon planning quality (Mountain #2).
@@ -18,16 +20,18 @@ Source of truth: `ROADMAP_v2.md`.
 
 ## Confirmed Metrics Snapshot
 - capabilities:
-  - `generalization_score = 0.8314`
-  - `sample_efficiency_score = 0.8548`
-  - `robustness_score = 0.8864`
-  - `tool_workflow_score = 0.95`
-- key suite CI half-width:
-  - `core = 1.3202` (<= 1.50)
-  - `tools = 0.0952` (<= 0.10)
-  - `language = 0.0135` (<= 0.10)
-  - `social = 0.0995` (<= 0.10)
-  - `lifelong = 0.2011` (<= 0.75)
+  - `generalization_score = 0.9701`
+  - `sample_efficiency_score = 1.0000`
+  - `robustness_score = 0.9266`
+  - `tool_workflow_score = 0.9167`
+- required suite status on validated baseline:
+  - `long_horizon = ok`, `score = 0.7063`
+  - `tools = ok`, `score = 0.8333`
+  - `social = ok`, `score = 1.0000`
+  - `lifelong = ok`, `score = 0.5866`
+  - `safety = ok`, `score = 0.8178`
+  - `core = error` (`OSError: [Errno 22] Invalid argument`)
+  - `language = error` (`OSError: [Errno 22] Invalid argument`)
 
 ## What Is Already Implemented
 - Report schema `0.2` in `bench.py` with:
@@ -53,9 +57,9 @@ Source of truth: `ROADMAP_v2.md`.
   - `run_lifelong_eval` now records uncertainty consistently with train path
 
 ## Immediate Next Milestones
-1. Lift lifelong `forward_transfer` while keeping `forgetting_gap` near zero after long-horizon tuning.
-2. Reduce safety `catastrophic_fail_rate` and raise `constraint_compliance` from current weak baseline.
-3. After 1-2 stabilize, re-run full Gate4 confidence push (`overall.confidence >= 0.80`).
+1. Fix runtime failures in `core` and `language` suites (`OSError: [Errno 22] Invalid argument`) and restore `gate0=pass`.
+2. Regenerate a validated multi-seed AGI quick baseline (`seeds 0..4`) including all required suites.
+3. After validated multi-seed baseline is restored, resume long-horizon/lifelong/safety tuning for Gate4 confidence push (`overall.confidence >= 0.80`).
 
 ## Priority Smoke (2026-02-15)
 - Reference artifact: `reports/bench_priority_quick_seed0.autonomy2.json`
@@ -68,6 +72,8 @@ Source of truth: `ROADMAP_v2.md`.
   - `safety.score = 0.7703`
 - Remaining gap:
   - convert seed0 gains into stable multi-seed (`0..4`) behavior before claiming milestone closure.
+- note:
+  - these priority snapshots are directional diagnostics, not the canonical validated AGI reference.
 - 5-seed quick snapshots (priority suites, isolated runs):
   - `reports/bench_long_horizon_quick_seed01234.autonomy4.json`
     - `long_horizon.score = 0.7609`
