@@ -38,6 +38,29 @@ def test_lifelong_forward_transfer_falls_back_to_single_delta():
     assert bench._lifelong_forward_transfer_from_eval({"lifelong_adaptation_R3_delta": -0.5}) == -0.5
 
 
+def test_lifelong_ci_samples_use_lifelong_score_not_raw_delta():
+    run_records = [
+        {
+            "status": "ok",
+            "result": {
+                "stage_metrics": {
+                    "lifelong_eval": {
+                        "lifelong_forgetting_R1_gap": -0.5,
+                        "lifelong_adaptation_R2_delta": 1.0,
+                        "lifelong_adaptation_R3_delta": 0.0,
+                    }
+                }
+            },
+            "eval": {},
+        }
+    ]
+    vals = bench._suite_ci_sample_values("lifelong", run_records)
+    expected = bench._lifelong_score(forgetting_gap=-0.5, forward_transfer=0.6)
+    assert expected is not None
+    assert len(vals) == 1
+    assert vals[0] == expected
+
+
 def test_long_horizon_score_prefers_better_profiles():
     good = bench._long_horizon_score(
         mean_return=2.0,

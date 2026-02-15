@@ -7372,6 +7372,9 @@ class Trainer:
                             R_self = torch.zeros(1, 1, device=self.device)
                             U_t = torch.zeros(1, 1, device=self.device)
 
+                        unc_episode += float(U_t.mean().item())
+                        unc_steps += 1
+
                         V_pi = self.agent.value_model(W_t, H_t, traits, M)
 
                         if use_self_flag:

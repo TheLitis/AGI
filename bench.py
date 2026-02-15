@@ -917,9 +917,16 @@ def _suite_ci_sample_values(suite_name: str, run_records: List[Dict[str, Any]]) 
             ll = stage_metrics.get("lifelong_eval", {})
             if not isinstance(ll, dict):
                 continue
+            fg = ll.get("lifelong_forgetting_R1_gap")
+            if not (isinstance(fg, (int, float)) and math.isfinite(float(fg))):
+                fg = None
             ft = _lifelong_forward_transfer_from_eval(ll)
-            if ft is not None:
-                values.append(float(ft))
+            s = _lifelong_score(
+                forgetting_gap=float(fg) if fg is not None else None,
+                forward_transfer=float(ft) if ft is not None else None,
+            )
+            if s is not None:
+                values.append(float(s))
             continue
         if suite_name == "safety":
             compliance, catastrophic = _safety_metrics_from_eval(eval_metrics)
@@ -1392,6 +1399,9 @@ def _run_suite(
                         run_mode = "lifelong"
                         run_lifecycle = True
                         run_regime_aware_replay = True
+                        # Lifelong chapter transitions are non-stationary; sampled policy
+                        # is less brittle than greedy decoding across seeds.
+                        run_eval_policy = "sample"
                         # Quick lifelong is variance-sensitive; a more balanced replay mix
                         # improves forgetting without collapsing adaptation.
                         run_replay_frac_current = 0.3 if quick else 0.7
