@@ -1,40 +1,31 @@
-﻿# Execution Checklist (Roadmap v2)
+﻿# Execution Checklist (Roadmap v2, Synced 2026-02-15)
 
-## 0) Environment
-- [ ] Install deps: `pip install -r requirements.txt`
-- [ ] Verify bench tests: `python -m pytest tests/test_bench_gates.py tests/test_agi_bench_report.py tests/test_bench_scoring.py -q`
+## A) Verified Current State
+- [x] Verify gate/schema unit tests: `python -m pytest tests/test_bench_gates.py tests/test_agi_bench_report.py tests/test_bench_scoring.py -q`
+- [x] Verify full test suite health: `python -m pytest -q`
+- [x] Produce 5-seed AGI quick reference report: `reports/agi_v1.quick.seed01234.stab2.json`
+- [x] Confirm `gate2 == pass` on reference report
+- [x] Confirm `gate3 == pass` on reference report
+- [x] Confirm `gate4 == fail` and blocker is `overall.confidence < 0.80`
+- [x] Confirm capability vector thresholds are met (`generalization/sample_efficiency/robustness/tool_workflow`)
 
-## 1) Smoke (fast)
-- [ ] Full quick smoke: `python bench.py --suite quick --seeds 0 --report reports/bench_quick_smoke_seed0.json`
-- [ ] AGI quick smoke: `python bench.py --suite agi_v1 --quick --seeds 0 --report reports/agi_v1.quick.smoke.seed0.json`
+## B) Gate4 Close Tasks (Operational)
+- [ ] Reproduce independent rerun #2: `python bench.py --suite agi_v1 --quick --seeds 0,1,2,3,4 --report reports/agi_v1.quick.seed01234.rerun2.json`
+- [ ] Validate rerun #2 structure and gates: `python validate_bench_report.py --report reports/agi_v1.quick.seed01234.rerun2.json`
+- [ ] Raise `overall.confidence` to `>= 0.80` on repeated runs
+- [ ] Keep Gate3 CI thresholds below limits after confidence-tuning changes
 
-## 2) Gate2 Candidate Runs
-- [ ] Run 1: `python bench.py --suite agi_v1 --quick --seeds 0,1,2 --report reports/agi_v1.quick.gate2.seed012.run1.json`
-- [ ] Run 2: `python bench.py --suite agi_v1 --quick --seeds 0,1,2 --report reports/agi_v1.quick.gate2.seed012.run2.json`
-- [ ] Confirm both reports show `overall.gates.gate2 == pass`
-- [ ] Validate report structure: `python validate_bench_report.py --report reports/agi_v1.quick.gate2.seed012.run1.json --expect-gate gate2=pass`
+## C) Acceptance Runs Beyond Quick
+- [ ] Full 5-seed run: `python bench.py --suite agi_v1 --seeds 0,1,2,3,4 --report reports/agi_v1.full.seed01234.accept.json`
+- [ ] Full 5-seed OOD run: `python bench.py --suite agi_v1 --ood --seeds 0,1,2,3,4 --report reports/agi_v1.full.ood.seed01234.accept.json`
+- [ ] Confirm Gate status consistency between quick/full/OOD runs
 
-## 3) Gate3 Candidate Runs (robustness)
-- [ ] 5-seed full: `python bench.py --suite agi_v1 --seeds 0,1,2,3,4 --report reports/agi_v1.full.gate3.seed01234.json`
-- [ ] 5-seed OOD: `python bench.py --suite agi_v1 --ood --seeds 0,1,2,3,4 --report reports/agi_v1.full.ood.seed01234.json`
-- [ ] Confirm `overall.gates.gate3 == pass` and CI half-width constraints per suite
-- [ ] Validate report structure: `python validate_bench_report.py --report reports/agi_v1.full.gate3.seed01234.json --expect-gate gate3=pass`
+## D) 8-Mountain Depth Backlog
+- [ ] Add long-horizon benchmark suite (100+ step planning and hierarchical subgoals)
+- [ ] Add adversarial safety/OOD pack (constraint compliance + catastrophic fail metrics)
+- [ ] Add stronger social/ToM transfer metrics
+- [ ] Expand multimodal coverage (beyond current text/grid/tool stack)
 
-## 4) Regression Discipline
-- [ ] Run targeted suites before/after risky changes:
-  - core: `python bench.py --suite core --quick --seeds 0,1,2 --report reports/bench_core_quick_seed012.regression.json`
-  - tools: `python bench.py --suite tools --quick --seeds 0,1,2 --report reports/bench_tools_quick_seed012.regression.json`
-  - language: `python bench.py --suite language --quick --seeds 0,1,2 --report reports/bench_language_quick_seed012.regression.json`
-- [ ] Keep previous baseline report for diff-based review
-
-## 5) OOD Pack
-- [ ] core OOD: `python bench.py --suite core --ood --seeds 0,1,2 --report reports/bench_core_ood_seed012.json`
-- [ ] tools OOD: `python bench.py --suite tools --ood --seeds 0,1,2 --report reports/bench_tools_ood_seed012.json`
-- [ ] language OOD: `python bench.py --suite language --ood --seeds 0,1,2 --report reports/bench_language_ood_seed012.json`
-- [ ] social OOD: `python bench.py --suite social --ood --seeds 0,1,2 --report reports/bench_social_ood_seed012.json`
-
-## 6) Acceptance Snapshot
-- [ ] Gate2 stable pass (two repeated runs)
-- [ ] Gate3 stable pass (5 seeds + OOD)
-- [ ] Capability vector populated in report (`overall.capabilities`)
-- [ ] Confidence available and >= threshold for Gate4 candidate
+## E) Reporting Discipline
+- [x] Keep `ROADMAP.md`, `ROADMAP_v2.md`, `CHECKLIST.md` in sync with the latest accepted report
+- [ ] For every new milestone run, append short gate delta + artifact list in commit message or changelog
