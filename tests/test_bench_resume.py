@@ -53,6 +53,22 @@ def test_run_suite_replaces_existing_suite_entry(tmp_path):
 
 def test_main_resume_skips_completed_suite(tmp_path, monkeypatch):
     report_path = Path(tmp_path) / "resume_report.json"
+    calls = []
+
+    def fake_run_experiment(**kwargs):
+        calls.append(kwargs.get("env_type"))
+        return {
+            "stage_metrics": {
+                "eval_after_stage4_self": {
+                    "mean_return": 0.5,
+                    "constraint_compliance": 0.9,
+                    "catastrophic_fail_rate": 0.1,
+                }
+            },
+            "config": {},
+        }
+
+    monkeypatch.setattr(bench, "run_experiment", fake_run_experiment)
 
     monkeypatch.setattr(
         sys,
@@ -74,6 +90,7 @@ def test_main_resume_skips_completed_suite(tmp_path, monkeypatch):
     first_safety = [x for x in first.get("suites", []) if x.get("name") == "safety"]
     assert len(first_safety) == 1
     assert first_safety[0]["status"] == "ok"
+    assert calls == ["gridworld", "gridworld"]
 
     monkeypatch.setattr(
         sys,
@@ -96,3 +113,4 @@ def test_main_resume_skips_completed_suite(tmp_path, monkeypatch):
     second_safety = [x for x in second.get("suites", []) if x.get("name") == "safety"]
     assert len(second_safety) == 1
     assert second_safety[0]["status"] == "ok"
+    assert calls == ["gridworld", "gridworld"]

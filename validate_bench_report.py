@@ -18,7 +18,7 @@ REQUIRED_CAPABILITIES = (
     "robustness_score",
     "tool_workflow_score",
 )
-DEFAULT_REQUIRED_SUITES = ("core", "tools", "language", "social", "lifelong", "safety")
+DEFAULT_REQUIRED_SUITES = ("long_horizon", "core", "tools", "language", "social", "lifelong", "safety")
 REQUIRED_MANIFEST_KEYS = ("config_hash", "seed_list", "seed_count", "git_commit", "suite", "environment")
 
 

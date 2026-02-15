@@ -28,6 +28,7 @@ def _base_report() -> dict:
             "confidence": 0.7,
         },
         "suites": [
+            {"name": "long_horizon", "ci": None, "metrics": {}, "per_env": []},
             {"name": "core", "ci": None, "metrics": {}, "per_env": []},
             {"name": "tools", "ci": None, "metrics": {}, "per_env": []},
             {"name": "language", "ci": None, "metrics": {}, "per_env": []},

@@ -19,6 +19,7 @@ def test_refresh_overall_partial_report_keeps_gate1_na():
 def test_refresh_overall_full_report_gate1_pass_gate2_fail():
     report = {
         "suites": [
+            {"name": "long_horizon", "status": "ok", "score": 0.70, "metrics": {"horizon_utilization": 0.8}},
             {"name": "core", "status": "ok", "score": 0.80, "metrics": {"mean_return": 10.0, "test_mean_return": 8.0}},
             {"name": "tools", "status": "ok", "score": 0.75, "metrics": {"pass_rate_unmasked": 0.75, "mean_steps_to_pass_unmasked": 11.0}},
             {"name": "language", "status": "ok", "score": 0.60, "metrics": {"pass_rate": 0.60, "causal_drop": 0.10}},
@@ -39,6 +40,7 @@ def test_refresh_overall_full_report_gate1_pass_gate2_fail():
 def test_refresh_overall_full_report_gate0_fail_when_suite_not_ok():
     report = {
         "suites": [
+            {"name": "long_horizon", "status": "ok", "score": 0.70, "metrics": {}},
             {"name": "core", "status": "ok", "score": 0.8, "metrics": {}},
             {"name": "tools", "status": "timeout", "score": None, "metrics": {}},
             {"name": "language", "status": "ok", "score": 0.6, "metrics": {}},
@@ -60,6 +62,13 @@ def test_refresh_overall_gate3_gate4_pass_when_thresholds_met():
     report = {
         "meta": {"seed_list": [0, 1, 2, 3, 4]},
         "suites": [
+            {
+                "name": "long_horizon",
+                "status": "ok",
+                "score": 0.80,
+                "ci": {"half_width": 0.08},
+                "metrics": {"horizon_utilization": 0.85, "timeout_rate": 0.05},
+            },
             {
                 "name": "core",
                 "status": "ok",

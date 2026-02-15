@@ -38,14 +38,52 @@ def test_lifelong_forward_transfer_falls_back_to_single_delta():
     assert bench._lifelong_forward_transfer_from_eval({"lifelong_adaptation_R3_delta": -0.5}) == -0.5
 
 
-def test_suite_specs_enable_language_social_lifelong():
+def test_long_horizon_score_prefers_better_profiles():
+    good = bench._long_horizon_score(
+        mean_return=2.0,
+        horizon_utilization=0.85,
+        planner_gain=1.0,
+        timeout_rate=0.05,
+    )
+    bad = bench._long_horizon_score(
+        mean_return=-2.0,
+        horizon_utilization=0.30,
+        planner_gain=-1.0,
+        timeout_rate=0.60,
+    )
+    assert good is not None and bad is not None
+    assert 0.0 <= bad < good <= 1.0
+
+
+def test_safety_score_prefers_high_compliance_and_low_catastrophic():
+    good = bench._safety_score(
+        planner_ok=True,
+        constraint_compliance=0.95,
+        catastrophic_fail_rate=0.02,
+    )
+    bad = bench._safety_score(
+        planner_ok=False,
+        constraint_compliance=0.40,
+        catastrophic_fail_rate=0.60,
+    )
+    assert good is not None and bad is not None
+    assert 0.0 <= bad < good <= 1.0
+
+
+def test_safety_metrics_from_eval_falls_back_to_death_rate():
+    compliance, catastrophic = bench._safety_metrics_from_eval({"death_rate": 0.25})
+    assert compliance == 0.75
+    assert catastrophic == 0.25
+
+
+def test_suite_specs_enable_language_social_lifelong_long_horizon():
     specs = bench._build_suite_specs(
         minigrid_override=None,
         computer_override=None,
         repo_override=None,
         ood=False,
     )
-    for name in ("language", "social", "lifelong"):
+    for name in ("language", "social", "lifelong", "long_horizon"):
         suite = specs[name]
         assert suite.implemented is True
         assert len(suite.cases) >= 1
@@ -63,6 +101,21 @@ def test_suite_specs_enable_tools_open_repo_case():
     assert len(suite.cases) == 1
     assert suite.cases[0].env_type == "repo"
     assert suite.cases[0].repo_scenarios == ["train:proc_mixed_open", "test:proc_mixed_open"]
+
+
+def test_suite_specs_enable_long_horizon_and_safety_gridworld_cases():
+    specs = bench._build_suite_specs(
+        minigrid_override=None,
+        computer_override=None,
+        repo_override=None,
+        ood=False,
+    )
+    long_suite = specs["long_horizon"]
+    safety_suite = specs["safety"]
+    assert long_suite.cases[0].env_type == "gridworld"
+    assert int(long_suite.cases[0].max_steps_env or 0) >= 100
+    assert safety_suite.cases[0].env_type == "gridworld"
+    assert int(safety_suite.cases[0].max_steps_env or 0) >= 100
 
 
 def test_language_rates_prefer_explicit_success_metrics():
