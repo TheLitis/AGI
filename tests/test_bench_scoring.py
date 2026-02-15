@@ -114,8 +114,10 @@ def test_suite_specs_enable_long_horizon_and_safety_gridworld_cases():
     safety_suite = specs["safety"]
     assert long_suite.cases[0].env_type == "gridworld"
     assert int(long_suite.cases[0].max_steps_env or 0) >= 100
+    assert int(long_suite.cases[0].max_energy_env or 0) >= int(long_suite.cases[0].max_steps_env or 0)
     assert safety_suite.cases[0].env_type == "gridworld"
     assert int(safety_suite.cases[0].max_steps_env or 0) >= 100
+    assert int(safety_suite.cases[0].max_energy_env or 0) >= int(safety_suite.cases[0].max_steps_env or 0)
 
 
 def test_language_rates_prefer_explicit_success_metrics():

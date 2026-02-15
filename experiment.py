@@ -50,14 +50,19 @@ def _build_env_pool(
     schedule_mode: str,
     episodes_per_phase: int,
     max_steps_env: int = 50,
+    max_energy_env: Optional[int] = None,
 ) -> EnvPool:
     train_envs: List[GridWorldEnv] = []
     test_envs: List[GridWorldEnv] = []
+    max_energy_eff = (
+        int(max_energy_env) if isinstance(max_energy_env, int) and int(max_energy_env) > 0 else None
+    )
 
     for idx in range(5):
         train_envs.append(
             GridWorldEnv(
                 max_steps=max_steps_env,
+                max_energy=max_energy_eff if max_energy_eff is not None else 20,
                 seed=seed + idx,
                 multi_task=True,
                 schedule_mode=schedule_mode,
@@ -72,6 +77,7 @@ def _build_env_pool(
         test_envs.append(
             GridWorldEnv(
                 max_steps=max_steps_env,
+                max_energy=max_energy_eff if max_energy_eff is not None else 20,
                 seed=seed + eid,
                 multi_task=True,
                 schedule_mode=schedule_mode,
@@ -292,6 +298,7 @@ def _build_mixed_env_pool(
     computer_scenarios: Optional[List[str]] = None,
     repo_scenarios: Optional[List[str]] = None,
     max_steps_env: int = 50,
+    max_energy_env: Optional[int] = None,
 ) -> EnvPool:
     """Combine GridWorld, MiniGrid, (optional) Computer, and (optional) RepoTool envs into a single EnvPool."""
     grid_pool = _build_env_pool(
@@ -299,6 +306,7 @@ def _build_mixed_env_pool(
         schedule_mode=schedule_mode,
         episodes_per_phase=episodes_per_phase,
         max_steps_env=max_steps_env,
+        max_energy_env=max_energy_env,
     )
     mg_pool: Optional[EnvPool] = None
     minigrid_optional_dep: Optional[str] = None
@@ -418,6 +426,7 @@ def run_experiment(
     schedule_mode: str = "iid",
     episodes_per_phase: int = 50,
     max_steps_env: int = 50,
+    max_energy_env: Optional[int] = None,
     minigrid_scenarios: Optional[List[str]] = None,
     computer_scenarios: Optional[List[str]] = None,
     repo_scenarios: Optional[List[str]] = None,
@@ -482,6 +491,7 @@ def run_experiment(
         episodes_per_phase: curriculum phase length for scenario scheduling.
         planning_horizon / planner_mode / planner_rollouts: planner settings.
         max_steps_env: environment episode length cap for GridWorld/Mixed pools.
+        max_energy_env: optional energy budget override for GridWorld/Mixed pools.
         log_dir: optional directory to save per-run JSONL logs (ExperimentLogger).
         run_id: optional run identifier for logs.
         n_steps, gamma, entropy_coef, curiosity_beta, beta_conflict, beta_uncertainty,
@@ -524,12 +534,16 @@ def run_experiment(
 
     env_choice = (env_type or "gridworld").lower()
     max_steps_env_eff = int(max(1, max_steps_env))
+    max_energy_env_eff = (
+        int(max_energy_env) if isinstance(max_energy_env, int) and int(max_energy_env) > 0 else None
+    )
     if env_choice == "gridworld" or env_choice == "toy":
         env_pool = _build_env_pool(
             seed=seed,
             schedule_mode=schedule_mode,
             episodes_per_phase=episodes_per_phase,
             max_steps_env=max_steps_env_eff,
+            max_energy_env=max_energy_env_eff,
         )
     elif env_choice == "tools":
         env_pool = _build_tool_env_pool(
@@ -573,6 +587,7 @@ def run_experiment(
             computer_scenarios=computer_scenarios,
             repo_scenarios=repo_scenarios,
             max_steps_env=max_steps_env_eff,
+            max_energy_env=max_energy_env_eff,
         )
     else:
         raise ValueError(
@@ -695,6 +710,7 @@ def run_experiment(
                 "device": str(device),
                 "n_scenarios": env_pool.n_scenarios,
                 "max_steps_env": env_pool.max_steps,
+                "max_energy_env": int(max_energy_env_eff) if max_energy_env_eff is not None else None,
                 "stage_metrics": _sanitize(stage_metrics),
             }
             if logger:
@@ -745,6 +761,7 @@ def run_experiment(
                 "device": str(device),
                 "n_scenarios": env_pool.n_scenarios,
                 "max_steps_env": env_pool.max_steps,
+                "max_energy_env": int(max_energy_env_eff) if max_energy_env_eff is not None else None,
                 "stage_metrics": _sanitize(stage_metrics),
             }
             if logger:
@@ -778,6 +795,7 @@ def run_experiment(
                 "device": str(device),
                 "n_scenarios": env_pool.n_scenarios,
                 "max_steps_env": env_pool.max_steps,
+                "max_energy_env": int(max_energy_env_eff) if max_energy_env_eff is not None else None,
                 "stage_metrics": _sanitize(stage_metrics),
             }
             if logger:
@@ -814,6 +832,7 @@ def run_experiment(
                 "device": str(device),
                 "n_scenarios": env_pool.n_scenarios,
                 "max_steps_env": env_pool.max_steps,
+                "max_energy_env": int(max_energy_env_eff) if max_energy_env_eff is not None else None,
                 "stage_metrics": _sanitize(stage_metrics),
             }
             if logger:
@@ -866,6 +885,7 @@ def run_experiment(
                 "device": str(device),
                 "n_scenarios": env_pool.n_scenarios,
                 "max_steps_env": env_pool.max_steps,
+                "max_energy_env": int(max_energy_env_eff) if max_energy_env_eff is not None else None,
                 "stage_metrics": _sanitize(stage_metrics),
             }
             if logger:
@@ -1042,6 +1062,7 @@ def run_experiment(
         "meta_conflict_ma": trainer.meta_conflict_ma,
         "meta_uncertainty_ma": trainer.meta_uncertainty_ma,
         "max_steps_env": env_pool.max_steps,
+        "max_energy_env": int(max_energy_env_eff) if max_energy_env_eff is not None else None,
         "final_traits": agent.traits.detach().cpu().numpy().tolist(),
         "final_preference_weights": traits_to_preference_weights(agent.traits)
         .detach()
@@ -1061,6 +1082,7 @@ def run_experiment(
             "schedule_mode": schedule_mode,
             "episodes_per_phase": episodes_per_phase,
             "max_steps_env": int(max_steps_env_eff),
+            "max_energy_env": int(max_energy_env_eff) if max_energy_env_eff is not None else None,
             "planning_horizon": planning_horizon,
             "planner_mode": planner_mode,
             "planner_rollouts": planner_rollouts,

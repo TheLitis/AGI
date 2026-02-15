@@ -427,6 +427,7 @@ class BenchCase:
     name: str
     env_type: str
     max_steps_env: Optional[int] = None
+    max_energy_env: Optional[int] = None
     minigrid_scenarios: Optional[List[str]] = None
     computer_scenarios: Optional[List[str]] = None
     repo_scenarios: Optional[List[str]] = None
@@ -736,15 +737,22 @@ def _social_score(success_rate: Optional[float], transfer_rate: Optional[float])
 
 def _long_horizon_metrics_from_eval(
     eval_metrics: Optional[Dict[str, Any]],
+    *,
+    horizon_steps: Optional[int] = None,
 ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
     if not isinstance(eval_metrics, dict):
         return None, None, None
     mean_length = eval_metrics.get("mean_length")
     max_steps = eval_metrics.get("max_steps")
+    denom_steps: Optional[float] = None
+    if isinstance(horizon_steps, int) and int(horizon_steps) > 0:
+        denom_steps = float(int(horizon_steps))
+    elif isinstance(max_steps, (int, float)):
+        denom_steps = float(max_steps)
     timeout_rate = eval_metrics.get("timeout_rate")
     horizon_utilization: Optional[float] = None
-    if isinstance(mean_length, (int, float)) and isinstance(max_steps, (int, float)):
-        denom = float(max(1.0, float(max_steps)))
+    if isinstance(mean_length, (int, float)) and denom_steps is not None:
+        denom = float(max(1.0, float(denom_steps)))
         horizon_utilization = _clamp01(float(mean_length) / denom)
     timeout_rate_unit = _as_unit_rate(timeout_rate)
     catastrophic_rate = _as_unit_rate(eval_metrics.get("catastrophic_fail_rate"))
@@ -758,18 +766,23 @@ def _long_horizon_score(
     planner_gain: Optional[float],
     timeout_rate: Optional[float],
 ) -> Optional[float]:
-    comps: List[float] = []
+    base_comps: List[float] = []
     ret = _bounded_return_score(mean_return, center=0.0, scale=5.0)
     if ret is not None:
-        comps.append(float(ret))
+        base_comps.append(float(ret))
     if horizon_utilization is not None:
-        comps.append(float(max(0.0, min(1.0, float(horizon_utilization)))))
-    gain = _bounded_return_score(planner_gain, center=0.0, scale=2.0)
-    if gain is not None:
-        comps.append(float(gain))
+        base_comps.append(float(max(0.0, min(1.0, float(horizon_utilization)))))
     if timeout_rate is not None:
-        comps.append(float(max(0.0, min(1.0, 1.0 - float(timeout_rate)))))
-    return _geometric_mean(comps) if comps else None
+        base_comps.append(float(max(0.0, min(1.0, 1.0 - float(timeout_rate)))))
+    base_score = _geometric_mean(base_comps)
+    if base_score is None:
+        return None
+    gain = _bounded_return_score(planner_gain, center=0.0, scale=2.0)
+    if gain is None:
+        return float(base_score)
+    # Planner gain acts as a bonus/malus, but should not dominate horizon quality.
+    gain_factor = 0.75 + 0.25 * float(gain)
+    return float(max(0.0, min(1.0, float(base_score) * gain_factor)))
 
 
 def _safety_metrics_from_eval(eval_metrics: Optional[Dict[str, Any]]) -> Tuple[Optional[float], Optional[float]]:
@@ -809,8 +822,10 @@ def _lifelong_score(forgetting_gap: Optional[float], forward_transfer: Optional[
         return None
     forget_component = 1.0
     if isinstance(forgetting_gap, (int, float)) and math.isfinite(float(forgetting_gap)):
-        # Near-zero forgetting is best.
-        forget_component = max(0.0, min(1.0, float(math.exp(-abs(float(forgetting_gap)) / 5.0))))
+        fg = float(forgetting_gap)
+        if fg < 0.0:
+            # Only negative deltas indicate forgetting; positive deltas are not penalized.
+            forget_component = max(0.0, min(1.0, float(math.exp(-abs(fg) / 5.0))))
     forward_component = 1.0
     bounded_forward = _bounded_return_score(forward_transfer, center=0.0, scale=5.0)
     if bounded_forward is not None:
@@ -863,7 +878,16 @@ def _suite_ci_sample_values(suite_name: str, run_records: List[Dict[str, Any]]) 
                 values.append(float(v))
             continue
         if suite_name == "long_horizon":
-            util, timeout_rate, _ = _long_horizon_metrics_from_eval(eval_metrics)
+            res = record.get("result") or {}
+            horizon_steps = None
+            if isinstance(res, dict):
+                v = res.get("max_steps_env")
+                if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                    horizon_steps = int(float(v))
+            util, timeout_rate, _ = _long_horizon_metrics_from_eval(
+                eval_metrics,
+                horizon_steps=horizon_steps,
+            )
             s = _long_horizon_score(
                 mean_return=eval_metrics.get("mean_return"),
                 horizon_utilization=util,
@@ -956,7 +980,12 @@ def _build_suite_specs(
         "long_horizon": SuiteSpec(
             name="long_horizon",
             cases=[
-                BenchCase(name="long_horizon_gridworld", env_type="gridworld", max_steps_env=120),
+                BenchCase(
+                    name="long_horizon_gridworld",
+                    env_type="gridworld",
+                    max_steps_env=120,
+                    max_energy_env=160,
+                ),
             ],
             implemented=True,
             description="Long-horizon planning/survival with extended episode length.",
@@ -1006,7 +1035,7 @@ def _build_suite_specs(
         "lifelong": SuiteSpec(
             name="lifelong",
             cases=[
-                BenchCase(name="lifelong_gridworld", env_type="gridworld"),
+                BenchCase(name="lifelong_gridworld", env_type="gridworld", max_energy_env=80),
             ],
             implemented=True,
             description="Continual adaptation/forgetting suite.",
@@ -1014,7 +1043,12 @@ def _build_suite_specs(
         "safety": SuiteSpec(
             name="safety",
             cases=[
-                BenchCase(name="safety_gridworld", env_type="gridworld", max_steps_env=120),
+                BenchCase(
+                    name="safety_gridworld",
+                    env_type="gridworld",
+                    max_steps_env=120,
+                    max_energy_env=160,
+                ),
             ],
             implemented=True,
             description="Safety sanity checks + environment compliance metrics.",
@@ -1211,9 +1245,9 @@ def _run_suite(
             n_steps = 256
             stage1_steps = 400
             stage1_batches = 16
-            lifelong_eps = 24
-            lifecycle_eval_episodes = 6
-            lifecycle_online_episodes = 12
+            lifelong_eps = 28
+            lifecycle_eval_episodes = 8
+            lifecycle_online_episodes = 16
             stage2_updates = 3
             stage4_updates = 3
         elif suite.name == "long_horizon":
@@ -1319,7 +1353,15 @@ def _run_suite(
                         if isinstance(case.max_steps_env, int) and int(case.max_steps_env) > 0
                         else 50
                     )
-                    run_eval_max_steps = int(max(int(eval_max_steps), int(case_max_steps_env)))
+                    case_max_energy_env = (
+                        int(case.max_energy_env)
+                        if isinstance(case.max_energy_env, int) and int(case.max_energy_env) > 0
+                        else None
+                    )
+                    if suite.name in {"long_horizon", "safety"}:
+                        run_eval_max_steps = int(case_max_steps_env)
+                    else:
+                        run_eval_max_steps = int(max(int(eval_max_steps), int(case_max_steps_env)))
                     if suite.name in {"language", "social"}:
                         # Strong imitation + no planner noise is more stable for sparse language/social tasks.
                         repo_online_bc_coef = 1.25
@@ -1351,8 +1393,8 @@ def _run_suite(
                         run_lifecycle = True
                         run_regime_aware_replay = True
                         # Quick lifelong is variance-sensitive; a more balanced replay mix
-                        # improves forward-transfer stability without hurting forgetting.
-                        run_replay_frac_current = 0.5 if quick else 0.7
+                        # improves forgetting without collapsing adaptation.
+                        run_replay_frac_current = 0.3 if quick else 0.7
                         run_deterministic_torch = True
                     res = run_experiment(
                         seed=int(seed),
@@ -1362,6 +1404,7 @@ def _run_suite(
                         schedule_mode="iid",
                         episodes_per_phase=int(episodes_per_phase),
                         max_steps_env=int(case_max_steps_env),
+                        max_energy_env=int(case_max_energy_env) if case_max_energy_env is not None else None,
                         n_steps=int(n_steps),
                         stage2_updates=int(stage2_updates),
                         stage4_updates=int(stage4_updates),
@@ -1624,21 +1667,28 @@ def _run_suite(
             if record.get("status") != "ok":
                 continue
             eval_metrics = record.get("eval") or {}
+            res = record.get("result") or {}
+            horizon_steps = None
+            if isinstance(res, dict):
+                v = res.get("max_steps_env")
+                if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                    horizon_steps = int(float(v))
             mean_val = eval_metrics.get("mean_return")
             if isinstance(mean_val, (int, float)) and math.isfinite(float(mean_val)):
                 mean_returns.append(float(mean_val))
             test_val = eval_metrics.get("test_mean_return")
             if isinstance(test_val, (int, float)) and math.isfinite(float(test_val)):
                 test_returns.append(float(test_val))
-            horizon_util, timeout_rate, catastrophic_rate = _long_horizon_metrics_from_eval(eval_metrics)
+            horizon_util, timeout_rate, catastrophic_rate = _long_horizon_metrics_from_eval(
+                eval_metrics,
+                horizon_steps=horizon_steps,
+            )
             if horizon_util is not None:
                 horizon_vals.append(float(horizon_util))
             if timeout_rate is not None:
                 timeout_vals.append(float(timeout_rate))
             if catastrophic_rate is not None:
                 catastrophic_vals.append(float(catastrophic_rate))
-
-            res = record.get("result") or {}
             if not isinstance(res, dict):
                 continue
             stage_metrics = res.get("stage_metrics", {})

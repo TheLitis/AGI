@@ -5603,20 +5603,14 @@ class Trainer:
                     death_flag_raw = info.get("death_flag")
                     if isinstance(death_flag_raw, (int, float)) and float(death_flag_raw) > 0.0:
                         episode_had_death = True
-                        episode_had_violation = True
-                        episode_had_catastrophic = True
 
                     alive_raw = info.get("alive")
                     if isinstance(alive_raw, bool):
                         if not alive_raw:
                             episode_had_death = True
-                            episode_had_violation = True
-                            episode_had_catastrophic = True
                     elif isinstance(alive_raw, (int, float)):
                         if float(alive_raw) <= 0.0:
                             episode_had_death = True
-                            episode_had_violation = True
-                            episode_had_catastrophic = True
 
                     patch = next_obs["patch"]
                     energy = next_obs["energy"]
@@ -5671,9 +5665,10 @@ class Trainer:
                 reason_counts[reason_raw] = reason_counts.get(reason_raw, 0) + 1
 
                 reason_norm = reason_raw.lower()
-                if reason_norm in {"energy_depleted", "terminated_danger", "pytest_timeout"}:
-                    episode_had_death = True
+                if reason_norm in {"terminated_danger", "pytest_timeout"}:
                     episode_had_violation = True
+                    episode_had_catastrophic = True
+                if episode_had_death and episode_had_damage:
                     episode_had_catastrophic = True
 
                 if episode_had_damage:

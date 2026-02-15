@@ -51,6 +51,7 @@ def test_run_experiment_respects_gridworld_max_steps_env():
         mode="stage1",
         env_type="gridworld",
         max_steps_env=77,
+        max_energy_env=88,
         stage1_steps=1,
         stage1_batches=1,
         eval_episodes=1,
@@ -59,3 +60,4 @@ def test_run_experiment_respects_gridworld_max_steps_env():
         force_cpu=True,
     )
     assert int(result.get("max_steps_env", -1)) == 77
+    assert int(result.get("max_energy_env", -1)) == 88
