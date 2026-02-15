@@ -285,6 +285,16 @@ class Trainer:
         self.regimes: Dict[str, RegimeConfig] = {}
         self.regime_priorities: Dict[str, float] = {}
         self.regime_env_descriptors: Dict[str, Any] = {}
+        self.lifelong_trait_memory: Dict[str, torch.Tensor] = {}
+        self.lifelong_trait_memory_score: Dict[str, float] = {}
+        self.lifelong_reflect_early_step_boost = 2
+        self.lifelong_reflect_early_step_size_scale = 1.2
+        self.lifelong_reflect_early_lambda_prior_scale = 0.5
+        self.lifelong_reflect_late_step_delta = -1
+        self.lifelong_reflect_late_step_size_scale = 0.8
+        self.lifelong_reflect_late_lambda_prior_scale = 1.5
+        self.lifelong_reflect_safety_step_size_scale = 0.8
+        self.lifelong_reflect_safety_lambda_prior_scale = 1.5
         self.safety_threshold = float(safety_threshold)
         self.safety_penalty_coef = float(safety_penalty_coef)
         self.safety = SelfReflectionSafetyConfig()
@@ -2750,6 +2760,132 @@ class Trainer:
                 }
             )
         return new_regimes, changed_regimes
+
+    def _regime_base_key(self, regime_name: str) -> str:
+        name = str(regime_name or "").strip()
+        if name.endswith("_return"):
+            return name[: -len("_return")]
+        return name
+
+    def _set_main_traits(self, main_traits: torch.Tensor) -> None:
+        target = main_traits.detach()
+        if target.dim() == 1:
+            target = target.view(1, -1)
+        target = target.to(device=self.agent.traits.device, dtype=self.agent.traits.dtype)
+        with torch.no_grad():
+            if self.agent.traits.dim() == 2 and self.agent.traits.size(0) > 1:
+                self.agent.traits.data[0:1] = target[0:1]
+            else:
+                self.agent.traits.data = target
+            self.agent.traits.data.clamp_(-2.0, 2.0)
+
+    def _recall_lifelong_traits(
+        self,
+        current_traits: torch.Tensor,
+        regime_name: str,
+    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        regime = str(regime_name or "")
+        base_key = self._regime_base_key(regime)
+        current_main = current_traits
+        if current_main.dim() == 1:
+            current_main = current_main.view(1, -1)
+        current_main = current_main[:1].detach()
+        memory = self.lifelong_trait_memory.get(base_key)
+        recall_weight = 0.8 if regime.endswith("_return") else 0.3
+        info: Dict[str, Any] = {
+            "base_key": base_key,
+            "memory_used": False,
+            "recall_weight": recall_weight,
+            "score": self.lifelong_trait_memory_score.get(base_key),
+        }
+        if not isinstance(memory, torch.Tensor):
+            return current_main, info
+        mem = memory.detach()
+        if mem.dim() == 1:
+            mem = mem.view(1, -1)
+        mem = mem[:1].to(device=current_main.device, dtype=current_main.dtype)
+        blended = recall_weight * mem + (1.0 - recall_weight) * current_main
+        info["memory_used"] = True
+        return blended, info
+
+    def _update_lifelong_trait_memory_if_better(
+        self,
+        regime_name: str,
+        mean_return: float,
+        traits_main: torch.Tensor,
+    ) -> bool:
+        base_key = self._regime_base_key(regime_name)
+        prev = self.lifelong_trait_memory_score.get(base_key)
+        if prev is not None and float(mean_return) <= float(prev):
+            return False
+        store = traits_main.detach()
+        if store.dim() == 1:
+            store = store.view(1, -1)
+        self.lifelong_trait_memory[base_key] = store[:1].cpu().clone()
+        self.lifelong_trait_memory_score[base_key] = float(mean_return)
+        return True
+
+    def _lifelong_reflection_schedule(
+        self,
+        *,
+        episode_idx: int,
+        episodes_per_chapter: int,
+        base_steps: int,
+        base_step_size: float,
+        base_lambda_prior: float,
+        high_safety_risk: bool = False,
+    ) -> Dict[str, Any]:
+        n_eps = max(1, int(episodes_per_chapter))
+        ep = max(0, int(episode_idx))
+        early_cut = max(1, int(math.ceil(float(n_eps) / 3.0)))
+        late_start = max(0, int(math.floor((2.0 * float(n_eps)) / 3.0)))
+        phase = "mid"
+        steps = int(base_steps)
+        step_size = float(base_step_size)
+        lambda_prior = float(base_lambda_prior)
+        if ep < early_cut:
+            phase = "early"
+            steps = int(base_steps) + int(getattr(self, "lifelong_reflect_early_step_boost", 2))
+            step_size = float(base_step_size) * float(getattr(self, "lifelong_reflect_early_step_size_scale", 1.2))
+            lambda_prior = float(base_lambda_prior) * float(getattr(self, "lifelong_reflect_early_lambda_prior_scale", 0.5))
+        elif ep >= late_start:
+            phase = "late"
+            steps = int(base_steps) + int(getattr(self, "lifelong_reflect_late_step_delta", -1))
+            step_size = float(base_step_size) * float(getattr(self, "lifelong_reflect_late_step_size_scale", 0.8))
+            lambda_prior = float(base_lambda_prior) * float(getattr(self, "lifelong_reflect_late_lambda_prior_scale", 1.5))
+
+        if bool(high_safety_risk):
+            step_size = step_size * float(getattr(self, "lifelong_reflect_safety_step_size_scale", 0.8))
+            lambda_prior = lambda_prior * float(getattr(self, "lifelong_reflect_safety_lambda_prior_scale", 1.5))
+
+        steps = int(max(1, min(12, steps)))
+        step_size = float(max(0.005, min(0.08, step_size)))
+        lambda_prior = float(max(0.001, min(0.02, lambda_prior)))
+        return {
+            "phase": phase,
+            "steps": steps,
+            "step_size": step_size,
+            "lambda_prior": lambda_prior,
+            "high_safety_risk": bool(high_safety_risk),
+        }
+
+    def _compute_lifelong_past_regime_weights(self, eps: float = 1.0e-3) -> Dict[str, float]:
+        weights: Dict[str, float] = {}
+        for regime_name, stats in self.regime_stats.items():
+            if not isinstance(stats, dict):
+                continue
+            try:
+                forgetting_gap = float(stats.get("forgetting_gap", 0.0))
+            except Exception:
+                forgetting_gap = 0.0
+            try:
+                uncertainty = float(stats.get("uncertainty", 0.0))
+            except Exception:
+                uncertainty = 0.0
+            w = float(eps + max(0.0, forgetting_gap) + 0.5 * max(0.0, uncertainty))
+            if math.isfinite(w) and w > 0.0:
+                weights[str(regime_name)] = w
+        return weights
 
     # =========================
     #  Stage 1: random experience
@@ -6527,8 +6663,21 @@ class Trainer:
             fn_new = new_buffer.sample_sequences_with_events if with_events else new_buffer.sample_sequences
             samples.append(fn_new(n_new, seq_len))
         if _can(old_buffer, n_old):
-            fn_old = old_buffer.sample_sequences_with_events if with_events else old_buffer.sample_sequences
-            samples.append(fn_old(n_old, seq_len))
+            past_regime_weights = self._compute_lifelong_past_regime_weights()
+            mix_cfg = {
+                "current_regime": str(self.current_regime_name or ""),
+                "frac_current": 0.0,
+                "past_regime_weights": past_regime_weights,
+                "sampling_temperature": 1.0,
+            }
+            samples.append(
+                old_buffer.sample_mixed(
+                    batch_size=n_old,
+                    seq_len=seq_len,
+                    mix_config=mix_cfg,
+                    with_events=with_events,
+                )
+            )
 
         if not samples:
             return None
@@ -6902,6 +7051,7 @@ class Trainer:
         step_size_reflect_base = float(self.trait_reflection_lr)
         n_steps_reflect_base = self.trait_reflection_steps_per_batch
         lambda_reg = 0.0
+        lambda_prior_base = 5.0e-3
         if self.is_minigrid:
             n_steps_reflect_base = max(self.trait_reflection_steps_per_batch, self.trait_reflection_steps_per_batch)
 
@@ -6924,10 +7074,6 @@ class Trainer:
         baseline_regime_perf: Dict[str, float] = {}
         per_chapter: List[Dict[str, Any]] = []
         trait_stats: Dict[str, Dict[str, Any]] = {}
-        planner_alpha_vals_all: List[float] = []
-        planner_js_vals_all: List[float] = []
-        planner_margin_vals_all: List[float] = []
-        planner_override_vals_all: List[float] = []
         planner_alpha_vals_all: List[float] = []
         planner_js_vals_all: List[float] = []
         planner_margin_vals_all: List[float] = []
@@ -6960,9 +7106,14 @@ class Trainer:
         for chapter_idx, regime in enumerate(schedule):
             self.current_regime_name = regime.name
             if chapter_idx == 0:
-                self.agent.traits.data = prior_traits.clone()
+                self._set_main_traits(prior_traits)
             else:
-                self.agent.traits.data = current_traits.clone()
+                self._set_main_traits(current_traits)
+            recalled_traits, trait_memory_recall = self._recall_lifelong_traits(
+                current_traits=self._main_traits().detach().clone(),
+                regime_name=regime.name,
+            )
+            self._set_main_traits(recalled_traits)
 
             reward_profile = regime.reward_profile or {}
             trait_head = self.agent.traits.detach().clone()
@@ -6980,7 +7131,7 @@ class Trainer:
             planner_margin_vals_ch: List[float] = []
             planner_override_vals_ch: List[float] = []
 
-            for _ in range(episodes_per_chapter):
+            for ep_idx in range(episodes_per_chapter):
                 scenario_id = self._sample_scenario_for_regime(regime, scenario_map)
                 obs = self.env.reset(scenario_id=scenario_id)
                 scenario_counts[str(scenario_id)] = scenario_counts.get(str(scenario_id), 0) + 1
@@ -7235,8 +7386,21 @@ class Trainer:
                     env_seq = np.array([tr["env_id"] for tr in trajectory], dtype=np.int64)[None, ...]
 
                     anchor_traits = self._main_traits().detach().clone()
-                    step_size_reflect = step_size_reflect_base
-                    n_steps_reflect = n_steps_reflect_base
+                    death_flag_last = float(last_info.get("death_flag", 0.0)) if isinstance(last_info, dict) else 0.0
+                    alive_last = bool(last_info.get("alive", True)) if isinstance(last_info, dict) else True
+                    high_damage = int(damage_count) >= max(1, int(0.15 * max(1, int(t))))
+                    high_safety_risk = bool(high_damage or death_flag_last > 0.0 or (not alive_last))
+                    reflect_cfg = self._lifelong_reflection_schedule(
+                        episode_idx=ep_idx,
+                        episodes_per_chapter=int(episodes_per_chapter),
+                        base_steps=int(n_steps_reflect_base),
+                        base_step_size=float(step_size_reflect_base),
+                        base_lambda_prior=float(lambda_prior_base),
+                        high_safety_risk=high_safety_risk,
+                    )
+                    step_size_reflect = float(reflect_cfg["step_size"])
+                    n_steps_reflect = int(reflect_cfg["steps"])
+                    lambda_prior_cur = float(reflect_cfg["lambda_prior"])
                     info_reflect = self._run_trait_reflection(
                         batch=(
                             obs_seq,
@@ -7264,6 +7428,9 @@ class Trainer:
                     )
                     regime_step_norms.setdefault(regime.name, []).extend(info_reflect.get("step_norms", []))
                     regime_step_counts[regime.name] = regime_step_counts.get(regime.name, 0) + int(info_reflect.get("steps", 0))
+                    with torch.no_grad():
+                        self.agent.traits.add_(lambda_prior_cur * (prior_traits - self.agent.traits))
+                        self.agent.traits.clamp_(-2.0, 2.0)
 
             current_traits = self.agent.traits.detach().clone()
             stats = _collect_trait_stats(trait_head, current_traits)
@@ -7273,6 +7440,11 @@ class Trainer:
             mean_len = float(np.mean(chapter_lengths)) if chapter_lengths else 0.0
             mean_food = float(np.mean(chapter_food)) if chapter_food else 0.0
             mean_damage = float(np.mean(chapter_damage)) if chapter_damage else 0.0
+            trait_memory_updated = self._update_lifelong_trait_memory_if_better(
+                regime_name=regime.name,
+                mean_return=mean_ret,
+                traits_main=current_traits,
+            )
             baseline_val = baseline_regime_perf.setdefault(regime.name, mean_ret)
             self._record_regime_stats(
                 regime_name=regime.name,
@@ -7367,6 +7539,8 @@ class Trainer:
                     "description": regime.description,
                     "returns": [float(x) for x in chapter_returns],
                     "scenario_counts": scenario_counts,
+                    "trait_memory_recall": dict(trait_memory_recall),
+                    "trait_memory_updated": bool(trait_memory_updated),
                     "train_info": {
                         "policy_updates": int(len(policy_losses)),
                         "self_model_updates": int(len(self_losses)),
@@ -7426,6 +7600,10 @@ class Trainer:
             "prior_traits": prior_traits.detach().cpu().numpy().flatten().tolist(),
             "final_traits": self.agent.traits.detach().cpu().numpy().flatten().tolist(),
             "fast_param_l2_from_init": float(self._fast_param_distance_from_init()),
+            "lifelong_trait_memory_keys": sorted(self.lifelong_trait_memory.keys()),
+            "lifelong_trait_memory_scores": {
+                str(k): float(v) for k, v in self.lifelong_trait_memory_score.items()
+            },
             "lifelong_forgetting": {
                 "baseline": baseline_regime_perf,
                 "current": eval_current,
@@ -7504,6 +7682,7 @@ class Trainer:
         regime_step_norms: Dict[str, List[float]] = {}
         regime_step_counts: Dict[str, int] = {}
         step_size_reflect_base = float(lr)
+        lambda_prior_base = float(lambda_prior)
         if self.is_minigrid:
             step_size_reflect_base = float(self.trait_reflection_lr)
         n_steps_reflect_base = self.trait_reflection_steps_per_batch if not self.is_minigrid else max(
@@ -7527,6 +7706,10 @@ class Trainer:
         baseline_regime_perf: Dict[str, float] = {}
         per_chapter: List[Dict[str, Any]] = []
         trait_stats: Dict[str, Dict[str, Any]] = {}
+        planner_alpha_vals_all: List[float] = []
+        planner_js_vals_all: List[float] = []
+        planner_margin_vals_all: List[float] = []
+        planner_override_vals_all: List[float] = []
 
         def _adaptation_delta(values: List[float]) -> Optional[float]:
             if len(values) < 2:
@@ -7555,9 +7738,14 @@ class Trainer:
         for chapter_idx, regime in enumerate(schedule):
             # Reset traits for chapter start
             if chapter_idx == 0:
-                self.agent.traits.data = prior_traits.clone()
+                self._set_main_traits(prior_traits)
             else:
-                self.agent.traits.data = current_traits.clone()
+                self._set_main_traits(current_traits)
+            recalled_traits, trait_memory_recall = self._recall_lifelong_traits(
+                current_traits=self._main_traits().detach().clone(),
+                regime_name=regime.name,
+            )
+            self._set_main_traits(recalled_traits)
 
             reward_profile = regime.reward_profile or {}
             trait_head = self.agent.traits.detach().clone()
@@ -7813,8 +8001,21 @@ class Trainer:
                     env_seq = np.array([tr["env_id"] for tr in trajectory], dtype=np.int64)[None, ...]
 
                     anchor_traits = self._main_traits().detach().clone()
-                    step_size_reflect = step_size_reflect_base
-                    n_steps_reflect = n_steps_reflect_base
+                    death_flag_last = float(last_info.get("death_flag", 0.0)) if isinstance(last_info, dict) else 0.0
+                    alive_last = bool(last_info.get("alive", True)) if isinstance(last_info, dict) else True
+                    high_damage = int(damage_count) >= max(1, int(0.15 * max(1, int(t))))
+                    high_safety_risk = bool(high_damage or death_flag_last > 0.0 or (not alive_last))
+                    reflect_cfg = self._lifelong_reflection_schedule(
+                        episode_idx=ep_idx,
+                        episodes_per_chapter=int(episodes_per_chapter),
+                        base_steps=int(n_steps_reflect_base),
+                        base_step_size=float(step_size_reflect_base),
+                        base_lambda_prior=float(lambda_prior_base),
+                        high_safety_risk=high_safety_risk,
+                    )
+                    step_size_reflect = float(reflect_cfg["step_size"])
+                    n_steps_reflect = int(reflect_cfg["steps"])
+                    lambda_prior_cur = float(reflect_cfg["lambda_prior"])
                     info_reflect = self._run_trait_reflection(
                         batch=(
                             obs_seq,
@@ -7861,7 +8062,7 @@ class Trainer:
                         stats["trait_reflection_step_norm_sum"] += float(sum(step_norms))
                     # pull gently toward prior traits
                     with torch.no_grad():
-                        self.agent.traits.add_(lambda_prior * (prior_traits - self.agent.traits))
+                        self.agent.traits.add_(lambda_prior_cur * (prior_traits - self.agent.traits))
                         self.agent.traits.clamp_(-2.0, 2.0)
 
             current_traits = self.agent.traits.detach().clone()
@@ -7875,6 +8076,11 @@ class Trainer:
             mean_len = float(np.mean(chapter_lengths)) if chapter_lengths else 0.0
             mean_food = float(np.mean(chapter_food)) if chapter_food else 0.0
             mean_damage = float(np.mean(chapter_damage)) if chapter_damage else 0.0
+            trait_memory_updated = self._update_lifelong_trait_memory_if_better(
+                regime_name=regime.name,
+                mean_return=mean_ret,
+                traits_main=current_traits,
+            )
             prev_stats = self.regime_stats.get(regime.name)
             baseline_val = mean_ret if prev_stats is None else float(
                 prev_stats["avg_return"] + prev_stats["forgetting_gap"]
@@ -7914,6 +8120,8 @@ class Trainer:
                     "description": regime.description,
                     "returns": [float(x) for x in chapter_returns],
                     "scenario_counts": scenario_counts,
+                    "trait_memory_recall": dict(trait_memory_recall),
+                    "trait_memory_updated": bool(trait_memory_updated),
                     "planner_debug": chapter_planner_summary,
                 }
             )
@@ -7953,6 +8161,10 @@ class Trainer:
             "lifelong_forgetting_per_regime": forgetting_per_regime,
             "prior_traits": prior_traits.detach().cpu().numpy().flatten().tolist(),
             "final_traits": current_traits.detach().cpu().numpy().flatten().tolist(),
+            "lifelong_trait_memory_keys": sorted(self.lifelong_trait_memory.keys()),
+            "lifelong_trait_memory_scores": {
+                str(k): float(v) for k, v in self.lifelong_trait_memory_score.items()
+            },
         }
         metrics.update(
             self._planner_debug_summary(

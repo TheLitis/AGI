@@ -285,6 +285,8 @@ class ReplayBuffer:
         mix_config keys (all optional):
           - current_regime: str name of active regime
           - frac_current: float in [0,1], default 0.5
+          - past_regime_weights: Dict[str, float], optional weighted sampling over past regimes
+          - sampling_temperature: float > 0, optional temperature for regime weights
 
         If regimes are missing, gracefully falls back to uniform sampling.
         """
@@ -299,6 +301,14 @@ class ReplayBuffer:
         except Exception:
             frac_current = 0.5
         frac_current = max(0.0, min(1.0, frac_current))
+        raw_past_weights = mix_config.get("past_regime_weights", {}) or {}
+        if not isinstance(raw_past_weights, dict):
+            raw_past_weights = {}
+        try:
+            sampling_temperature = float(mix_config.get("sampling_temperature", 1.0))
+        except Exception:
+            sampling_temperature = 1.0
+        sampling_temperature = max(1.0e-3, sampling_temperature)
 
         # collect available regimes
         regimes = set(getattr(tr, "regime_name", "") for tr in self.buffer)
@@ -317,10 +327,24 @@ class ReplayBuffer:
             )
         # past regimes part (sample regimes uniformly)
         if n_past > 0 and past_regimes:
-            per_regime = max(1, n_past // max(1, len(past_regimes)))
+            weighted: List[float] = []
+            for regime in past_regimes:
+                try:
+                    w = float(raw_past_weights.get(regime, 0.0))
+                except Exception:
+                    w = 0.0
+                w = max(0.0, w)
+                if sampling_temperature != 1.0 and w > 0.0:
+                    w = float(w ** (1.0 / sampling_temperature))
+                weighted.append(w)
+            total_w = float(sum(weighted))
+            use_weighted = total_w > 0.0
             collected = []
             for _ in range(n_past):
-                regime = random.choice(past_regimes)
+                if use_weighted:
+                    regime = random.choices(past_regimes, weights=weighted, k=1)[0]
+                else:
+                    regime = random.choice(past_regimes)
                 try:
                     collected.append(
                         self.sample_by_regime(regime, 1, seq_len=seq_len, with_events=with_events)
