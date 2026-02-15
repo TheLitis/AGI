@@ -21,6 +21,11 @@ Updated: 2026-02-15
   - `sample_efficiency_score = 0.8548`
   - `robustness_score = 0.8864`
   - `tool_workflow_score = 0.95`
+- Priority-suite seed0 smoke after infrastructure/tuning:
+  - artifact: `reports/bench_priority_quick_seed0.autonomy2.json`
+  - `long_horizon.score = 0.7063`
+  - `lifelong.score = 0.6612`
+  - `safety.score = 0.8178`
 - Infra update completed:
   - dedicated `long_horizon` suite added to AGI-bench runs
   - `trainer.evaluate()` now emits operational safety metrics (`constraint_compliance`, `catastrophic_fail_rate`, `death_rate`, `reason_counts`)

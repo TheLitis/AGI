@@ -54,5 +54,13 @@ Source of truth: `ROADMAP_v2.md`.
 3. Reduce safety `catastrophic_fail_rate` and raise `constraint_compliance` from current weak baseline.
 4. After 1-3 stabilize, re-run full Gate4 confidence push (`overall.confidence >= 0.80`).
 
+## Priority Smoke (2026-02-15)
+- Reference artifact: `reports/bench_priority_quick_seed0.autonomy2.json`
+- `long_horizon.score = 0.7063`
+- `lifelong.score = 0.6612`
+- `safety.score = 0.8178`
+- Remaining gap:
+  - convert seed0 gains into stable multi-seed (`0..4`) behavior before claiming milestone closure.
+
 ## AGI Claim Rule
 Use "AGI-ready research prototype" wording until all `ROADMAP_v2.md` Gate4 conditions are satisfied and independently reproduced.

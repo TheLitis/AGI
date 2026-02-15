@@ -4,6 +4,7 @@
 - [x] Add dedicated `long_horizon` suite and wire it into AGI bench selection order
 - [x] Add per-case `max_steps_env` plumbing (`bench.py` -> `run_experiment`)
 - [x] Replace safety placeholders with runtime eval metrics (`constraint_compliance`, `catastrophic_fail_rate`, `death_rate`, `reason_counts`)
+- [x] Reach seed0 smoke targets for priority suites (`reports/bench_priority_quick_seed0.autonomy2.json`)
 - [ ] Tune long-horizon quality on multi-seed quick runs (target: stable `long_horizon.score >= 0.65`)
 - [ ] Improve lifelong metrics after long-horizon tuning (`forward_transfer` up, `forgetting_gap` near zero)
 - [ ] Reduce safety catastrophic failures and lift compliance on bench seeds
