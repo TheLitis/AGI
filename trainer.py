@@ -5385,6 +5385,11 @@ class Trainer:
             foods = []
             damages = []
             timeout_episodes = 0
+            death_episodes = 0
+            constraint_violation_episodes = 0
+            catastrophic_fail_episodes = 0
+            damage_episodes = 0
+            reason_counts: Dict[str, int] = {}
             scenario_counts: Dict[str, int] = {}
             env_counts: Dict[str, int] = {}
             train_returns = []
@@ -5447,6 +5452,10 @@ class Trainer:
                 done = False
                 food_count = 0
                 damage_count = 0
+                episode_had_damage = False
+                episode_had_death = False
+                episode_had_violation = False
+                episode_had_catastrophic = False
                 unc_episode = 0.0
                 unc_steps = 0
                 env_desc_np = None
@@ -5588,6 +5597,26 @@ class Trainer:
                         food_count += 1
                     if info.get("took_damage", False):
                         damage_count += 1
+                        episode_had_damage = True
+                        episode_had_violation = True
+
+                    death_flag_raw = info.get("death_flag")
+                    if isinstance(death_flag_raw, (int, float)) and float(death_flag_raw) > 0.0:
+                        episode_had_death = True
+                        episode_had_violation = True
+                        episode_had_catastrophic = True
+
+                    alive_raw = info.get("alive")
+                    if isinstance(alive_raw, bool):
+                        if not alive_raw:
+                            episode_had_death = True
+                            episode_had_violation = True
+                            episode_had_catastrophic = True
+                    elif isinstance(alive_raw, (int, float)):
+                        if float(alive_raw) <= 0.0:
+                            episode_had_death = True
+                            episode_had_violation = True
+                            episode_had_catastrophic = True
 
                     patch = next_obs["patch"]
                     energy = next_obs["energy"]
@@ -5624,6 +5653,37 @@ class Trainer:
                     repo_pass_flags.append(passed_flag)
                     if passed_flag:
                         repo_steps_to_pass.append(int(info.get("steps_taken", t)))
+
+                reason_raw = ""
+                if isinstance(info, dict):
+                    reason_raw = str(info.get("reason", "") or "").strip()
+                    if not reason_raw:
+                        status_raw = str(info.get("status", "") or "").strip().lower()
+                        if status_raw == "timeout":
+                            reason_raw = "pytest_timeout"
+                if not reason_raw:
+                    if not done and t >= max_steps:
+                        reason_raw = "eval_max_steps_cap"
+                    elif done:
+                        reason_raw = "done"
+                    else:
+                        reason_raw = "unknown"
+                reason_counts[reason_raw] = reason_counts.get(reason_raw, 0) + 1
+
+                reason_norm = reason_raw.lower()
+                if reason_norm in {"energy_depleted", "terminated_danger", "pytest_timeout"}:
+                    episode_had_death = True
+                    episode_had_violation = True
+                    episode_had_catastrophic = True
+
+                if episode_had_damage:
+                    damage_episodes += 1
+                if episode_had_death:
+                    death_episodes += 1
+                if episode_had_violation:
+                    constraint_violation_episodes += 1
+                if episode_had_catastrophic:
+                    catastrophic_fail_episodes += 1
 
                 returns.append(total_r)
                 lengths.append(t)
@@ -5690,6 +5750,14 @@ class Trainer:
             mean_len = float(np.mean(lengths)) if lengths else float("nan")
             mean_food = float(np.mean(foods)) if foods else 0.0
             mean_damage = float(np.mean(damages)) if damages else 0.0
+            denom_eps = float(max(1, int(n_episodes)))
+            death_rate = float(death_episodes) / denom_eps
+            damage_episode_rate = float(damage_episodes) / denom_eps
+            catastrophic_fail_rate = float(catastrophic_fail_episodes) / denom_eps
+            constraint_compliance = float(
+                max(0.0, min(1.0, 1.0 - (float(constraint_violation_episodes) / denom_eps)))
+            )
+            timeout_rate = float(timeout_episodes) / denom_eps
 
             print(
                 f"Eval[{mask_label}] (use_self={split_use_self}, planning_coef={planning_coef:.2f}): "
@@ -5697,6 +5765,11 @@ class Trainer:
                 f"mean length = {mean_len:.1f}, "
                 f"mean food = {mean_food:.2f}, "
                 f"mean damage = {mean_damage:.2f}"
+            )
+
+            print(
+                f"  Safety: compliance={constraint_compliance:.3f}, "
+                f"catastrophic_fail_rate={catastrophic_fail_rate:.3f}, death_rate={death_rate:.3f}"
             )
 
             if scenario_counts:
@@ -5758,11 +5831,17 @@ class Trainer:
                 "n_episodes": int(n_episodes),
                 "max_steps": int(max_steps),
                 "timeout_episodes": int(timeout_episodes),
+                "timeout_rate": timeout_rate,
                 "mean_return": mean_ret,
                 "std_return": std_ret,
                 "mean_length": mean_len,
                 "mean_food": mean_food,
                 "mean_damage": mean_damage,
+                "damage_episode_rate": damage_episode_rate,
+                "death_rate": death_rate,
+                "catastrophic_fail_rate": catastrophic_fail_rate,
+                "constraint_compliance": constraint_compliance,
+                "reason_counts": {str(k): int(v) for k, v in reason_counts.items()},
                 "scenario_counts": scenario_counts,
                 "env_counts": env_counts,
                 "returns": [float(x) for x in returns],
@@ -5823,6 +5902,12 @@ class Trainer:
                 "social_success_rate",
                 "social_train_success_rate",
                 "social_test_success_rate",
+                "timeout_rate",
+                "damage_episode_rate",
+                "death_rate",
+                "catastrophic_fail_rate",
+                "constraint_compliance",
+                "reason_counts",
             ):
                 if key in unmasked:
                     results[f"unmasked_{key}"] = unmasked[key]

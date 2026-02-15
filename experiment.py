@@ -417,6 +417,7 @@ def run_experiment(
     env_type: str = "gridworld",
     schedule_mode: str = "iid",
     episodes_per_phase: int = 50,
+    max_steps_env: int = 50,
     minigrid_scenarios: Optional[List[str]] = None,
     computer_scenarios: Optional[List[str]] = None,
     repo_scenarios: Optional[List[str]] = None,
@@ -480,6 +481,7 @@ def run_experiment(
         schedule_mode: env scheduling across scenarios ("iid", "round_robin", "curriculum").
         episodes_per_phase: curriculum phase length for scenario scheduling.
         planning_horizon / planner_mode / planner_rollouts: planner settings.
+        max_steps_env: environment episode length cap for GridWorld/Mixed pools.
         log_dir: optional directory to save per-run JSONL logs (ExperimentLogger).
         run_id: optional run identifier for logs.
         n_steps, gamma, entropy_coef, curiosity_beta, beta_conflict, beta_uncertainty,
@@ -521,12 +523,13 @@ def run_experiment(
     )
 
     env_choice = (env_type or "gridworld").lower()
+    max_steps_env_eff = int(max(1, max_steps_env))
     if env_choice == "gridworld" or env_choice == "toy":
         env_pool = _build_env_pool(
             seed=seed,
             schedule_mode=schedule_mode,
             episodes_per_phase=episodes_per_phase,
-            max_steps_env=50,
+            max_steps_env=max_steps_env_eff,
         )
     elif env_choice == "tools":
         env_pool = _build_tool_env_pool(
@@ -569,7 +572,7 @@ def run_experiment(
             minigrid_scenarios=minigrid_scenarios,
             computer_scenarios=computer_scenarios,
             repo_scenarios=repo_scenarios,
-            max_steps_env=50,
+            max_steps_env=max_steps_env_eff,
         )
     else:
         raise ValueError(
@@ -1057,6 +1060,7 @@ def run_experiment(
             "n_envs": getattr(env_pool, "n_envs", 0),
             "schedule_mode": schedule_mode,
             "episodes_per_phase": episodes_per_phase,
+            "max_steps_env": int(max_steps_env_eff),
             "planning_horizon": planning_horizon,
             "planner_mode": planner_mode,
             "planner_rollouts": planner_rollouts,

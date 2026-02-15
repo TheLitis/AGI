@@ -44,3 +44,18 @@ def test_eval_before_rl_runs_before_stage1_training(monkeypatch):
     assert call_order[:3] == ["evaluate", "collect_random_experience", "train_world_model"]
     assert "eval_before_rl" in result.get("stage_metrics", {})
 
+
+def test_run_experiment_respects_gridworld_max_steps_env():
+    result = experiment.run_experiment(
+        seed=0,
+        mode="stage1",
+        env_type="gridworld",
+        max_steps_env=77,
+        stage1_steps=1,
+        stage1_batches=1,
+        eval_episodes=1,
+        eval_max_steps=5,
+        episodes_per_phase=1,
+        force_cpu=True,
+    )
+    assert int(result.get("max_steps_env", -1)) == 77
