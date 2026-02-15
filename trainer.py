@@ -50,11 +50,57 @@ logger = logging.getLogger(__name__)
 
 class ExperimentLogger:
     """Minimal JSONL logger for scalar metrics per stage."""
+
+    _INVALID_FILENAME_CHARS = set('<>:"/\\|?*')
+    _WINDOWS_RESERVED_BASENAMES = {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9",
+    }
+
+    @classmethod
+    def _sanitize_run_id_for_filename(cls, run_id: str) -> str:
+        text = str(run_id or "")
+        sanitized_chars: List[str] = []
+        for ch in text:
+            code = ord(ch)
+            if code < 32 or code == 127 or ch in cls._INVALID_FILENAME_CHARS:
+                sanitized_chars.append("_")
+            else:
+                sanitized_chars.append(ch)
+        sanitized = "".join(sanitized_chars).strip().strip(".")
+        if not sanitized:
+            sanitized = f"run_{int(time.time())}"
+        base_upper = sanitized.upper()
+        if base_upper in cls._WINDOWS_RESERVED_BASENAMES:
+            sanitized = f"_{sanitized}"
+        return sanitized
+
     def __init__(self, run_id: str, logdir: str = "logs"):
         self.run_id = run_id or f"run_{int(time.time())}"
         self.logdir = Path(logdir)
         self.logdir.mkdir(parents=True, exist_ok=True)
-        self.filepath = self.logdir / f"{self.run_id}.jsonl"
+        filename_run_id = self._sanitize_run_id_for_filename(str(self.run_id))
+        self.filepath = self.logdir / f"{filename_run_id}.jsonl"
         self._fh = open(self.filepath, "a", encoding="utf-8")
 
     def log_scalar(self, stage: str, metric: str, value: float, **extra):
