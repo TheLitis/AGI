@@ -3636,6 +3636,133 @@ class Trainer:
             "planner_override_rate": override_rate,
         }
 
+    @staticmethod
+    def _discounted_nstep_returns(rewards: List[float], gamma: float, horizon: int) -> List[float]:
+        if not rewards:
+            return []
+        g = float(max(0.0, min(1.0, gamma)))
+        h = int(max(1, horizon))
+        n = len(rewards)
+        out: List[float] = []
+        for i in range(n):
+            acc = 0.0
+            w = 1.0
+            for k in range(h):
+                j = i + k
+                if j >= n:
+                    break
+                acc += w * float(rewards[j])
+                w *= g
+            out.append(float(acc))
+        return out
+
+    @staticmethod
+    def _planner_reality_check_summary(
+        *,
+        planner_scores: List[float],
+        policy_scores: List[float],
+        nstep_returns: List[float],
+        planner_top1_matches: List[float],
+        policy_top1_matches: List[float],
+        horizon: int,
+    ) -> Dict[str, Any]:
+        def _safe_corr(x_arr: np.ndarray, y_arr: np.ndarray) -> Optional[float]:
+            if x_arr.size < 2 or y_arr.size < 2 or x_arr.size != y_arr.size:
+                return None
+            if float(np.std(x_arr)) <= 1.0e-8 or float(np.std(y_arr)) <= 1.0e-8:
+                return None
+            c = float(np.corrcoef(x_arr, y_arr)[0, 1])
+            if math.isfinite(c):
+                return c
+            return None
+
+        n = min(
+            len(planner_scores),
+            len(policy_scores),
+            len(nstep_returns),
+            len(planner_top1_matches),
+            len(policy_top1_matches),
+        )
+        if n <= 0:
+            return {
+                "planner_reality_horizon": int(max(1, horizon)),
+                "planner_reality_steps": 0,
+                "planner_score_nstep_corr": None,
+                "policy_score_nstep_corr": None,
+                "planner_score_corr_advantage": None,
+                "planner_top1_match_rate": None,
+                "policy_top1_match_rate": None,
+                "planner_top1_nstep_mean": None,
+                "planner_non_top1_nstep_mean": None,
+                "planner_top1_advantage_nstep": None,
+                "planner_regret_proxy_nstep": None,
+            }
+
+        rows: List[Tuple[float, float, float, float, float]] = []
+        for i in range(n):
+            p = planner_scores[i]
+            pi = policy_scores[i]
+            r = nstep_returns[i]
+            p_match = planner_top1_matches[i]
+            pi_match = policy_top1_matches[i]
+            vals = (p, pi, r, p_match, pi_match)
+            if all(isinstance(v, (int, float)) and math.isfinite(float(v)) for v in vals):
+                rows.append((float(p), float(pi), float(r), float(p_match), float(pi_match)))
+        if not rows:
+            return {
+                "planner_reality_horizon": int(max(1, horizon)),
+                "planner_reality_steps": 0,
+                "planner_score_nstep_corr": None,
+                "policy_score_nstep_corr": None,
+                "planner_score_corr_advantage": None,
+                "planner_top1_match_rate": None,
+                "policy_top1_match_rate": None,
+                "planner_top1_nstep_mean": None,
+                "planner_non_top1_nstep_mean": None,
+                "planner_top1_advantage_nstep": None,
+                "planner_regret_proxy_nstep": None,
+            }
+        arr = np.asarray(rows, dtype=np.float32)
+        p_scores = arr[:, 0]
+        pi_scores = arr[:, 1]
+        rtg = arr[:, 2]
+        p_top1 = arr[:, 3]
+        pi_top1 = arr[:, 4]
+        m = int(arr.shape[0])
+
+        planner_corr = _safe_corr(p_scores, rtg)
+        policy_corr = _safe_corr(pi_scores, rtg)
+        corr_adv: Optional[float] = None
+        if planner_corr is not None and policy_corr is not None:
+            corr_adv = float(planner_corr - policy_corr)
+
+        planner_top1_match_rate = float(np.mean(p_top1)) if p_top1.size else None
+        policy_top1_match_rate = float(np.mean(pi_top1)) if pi_top1.size else None
+
+        top1_mask = p_top1 >= 0.5
+        non_top1_mask = ~top1_mask
+        top1_mean = float(np.mean(rtg[top1_mask])) if bool(np.any(top1_mask)) else None
+        non_top1_mean = float(np.mean(rtg[non_top1_mask])) if bool(np.any(non_top1_mask)) else None
+        top1_adv: Optional[float] = None
+        regret_proxy: Optional[float] = None
+        if top1_mean is not None and non_top1_mean is not None:
+            top1_adv = float(top1_mean - non_top1_mean)
+            regret_proxy = float(max(0.0, top1_adv))
+
+        return {
+            "planner_reality_horizon": int(max(1, horizon)),
+            "planner_reality_steps": int(m),
+            "planner_score_nstep_corr": planner_corr,
+            "policy_score_nstep_corr": policy_corr,
+            "planner_score_corr_advantage": corr_adv,
+            "planner_top1_match_rate": planner_top1_match_rate,
+            "policy_top1_match_rate": policy_top1_match_rate,
+            "planner_top1_nstep_mean": top1_mean,
+            "planner_non_top1_nstep_mean": non_top1_mean,
+            "planner_top1_advantage_nstep": top1_adv,
+            "planner_regret_proxy_nstep": regret_proxy,
+        }
+
     def _total_skill_count(self) -> int:
         latent_count = len(self.skill_library) if self.skill_library is not None else 0
         return len(self.skills) + latent_count
@@ -5828,6 +5955,7 @@ class Trainer:
                 pass
 
         def _run_eval(split_use_self: bool, mask_label: str) -> Dict[str, Any]:
+            planner_reality_horizon = 8
             returns = []
             lengths = []
             foods = []
@@ -5865,6 +5993,11 @@ class Trainer:
             planner_js_vals: List[float] = []
             planner_margin_vals: List[float] = []
             planner_override_vals: List[float] = []
+            planner_reality_planner_scores: List[float] = []
+            planner_reality_policy_scores: List[float] = []
+            planner_reality_nstep_returns: List[float] = []
+            planner_reality_planner_top1_matches: List[float] = []
+            planner_reality_policy_top1_matches: List[float] = []
 
             for _ in range(n_episodes):
                 obs = self.env.reset()
@@ -5918,9 +6051,15 @@ class Trainer:
                 unc_steps = 0
                 env_desc_np = None
                 info: Dict[str, Any] = {}
+                episode_rewards: List[float] = []
+                episode_planner_reality_rows: List[Tuple[int, float, float, float, float]] = []
 
                 while not done and t < max_steps:
                     skill_state["obs_history"].append({"patch": patch.copy(), "energy": float(energy)})
+                    diag_planner_score: Optional[float] = None
+                    diag_policy_score: Optional[float] = None
+                    diag_planner_top1_match: Optional[float] = None
+                    diag_policy_top1_match: Optional[float] = None
                     with torch.no_grad():
                         patch_t = torch.from_numpy(patch).long().unsqueeze(0).to(self.device)
                         H_t = torch.tensor([[energy]], dtype=torch.float32, device=self.device)
@@ -6023,6 +6162,8 @@ class Trainer:
                         else:
                             logits_raw, mask_logits_pred = self._policy_forward_with_mask(G_t)
                             logits = logits_raw
+                            policy_logits_for_diag = logits_raw.detach()
+                            planner_logits_for_diag: Optional[torch.Tensor] = None
 
                             if planning_coef > 0.0:
                                 planner_logits = self._get_planner_logits(
@@ -6032,6 +6173,7 @@ class Trainer:
                                     traits=traits,
                                     M=M,
                                 )
+                                planner_logits_for_diag = planner_logits.detach()
                                 logits, planner_debug = self._blend_with_planner(
                                     policy_logits=logits,
                                     planner_logits=planner_logits,
@@ -6056,9 +6198,49 @@ class Trainer:
                             else:
                                 dist = Categorical(logits=logits)
                                 action = dist.sample()
+                            action_idx = int(action.item())
+                            if (
+                                isinstance(policy_logits_for_diag, torch.Tensor)
+                                and policy_logits_for_diag.ndim == 2
+                                and policy_logits_for_diag.size(-1) > action_idx >= 0
+                            ):
+                                v = policy_logits_for_diag[0, action_idx]
+                                if torch.isfinite(v):
+                                    diag_policy_score = float(v.item())
+                                    diag_policy_top1_match = float(
+                                        int(torch.argmax(policy_logits_for_diag, dim=-1).item()) == action_idx
+                                    )
+                            if (
+                                isinstance(planner_logits_for_diag, torch.Tensor)
+                                and planner_logits_for_diag.ndim == 2
+                                and planner_logits_for_diag.size(-1) > action_idx >= 0
+                                and bool(torch.isfinite(planner_logits_for_diag).all().item())
+                            ):
+                                v = planner_logits_for_diag[0, action_idx]
+                                if torch.isfinite(v):
+                                    diag_planner_score = float(v.item())
+                                    diag_planner_top1_match = float(
+                                        int(torch.argmax(planner_logits_for_diag, dim=-1).item()) == action_idx
+                                    )
 
                     next_obs, _, done, info = self.env.step(action.item())
                     reward_env = self.compute_preference_reward(info)
+                    episode_rewards.append(float(reward_env))
+                    if (
+                        diag_planner_score is not None
+                        and diag_policy_score is not None
+                        and diag_planner_top1_match is not None
+                        and diag_policy_top1_match is not None
+                    ):
+                        episode_planner_reality_rows.append(
+                            (
+                                int(len(episode_rewards) - 1),
+                                float(diag_planner_score),
+                                float(diag_policy_score),
+                                float(diag_planner_top1_match),
+                                float(diag_policy_top1_match),
+                            )
+                        )
                     total_r += reward_env
                     t += 1
 
@@ -6110,6 +6292,19 @@ class Trainer:
 
                 if not done and t >= max_steps:
                     timeout_episodes += 1
+
+                episode_nstep_returns = self._discounted_nstep_returns(
+                    episode_rewards,
+                    gamma=float(getattr(self, "gamma", 1.0)),
+                    horizon=planner_reality_horizon,
+                )
+                for step_idx, planner_score, policy_score, planner_top1, policy_top1 in episode_planner_reality_rows:
+                    if 0 <= int(step_idx) < len(episode_nstep_returns):
+                        planner_reality_planner_scores.append(float(planner_score))
+                        planner_reality_policy_scores.append(float(policy_score))
+                        planner_reality_nstep_returns.append(float(episode_nstep_returns[int(step_idx)]))
+                        planner_reality_planner_top1_matches.append(float(planner_top1))
+                        planner_reality_policy_top1_matches.append(float(policy_top1))
 
                 if isinstance(info, dict) and "last_test_passed" in info:
                     passed_flag = bool(info.get("last_test_passed"))
@@ -6335,6 +6530,15 @@ class Trainer:
                 override_values=planner_override_vals,
             )
             metrics.update(planner_summary)
+            planner_reality_summary = self._planner_reality_check_summary(
+                planner_scores=planner_reality_planner_scores,
+                policy_scores=planner_reality_policy_scores,
+                nstep_returns=planner_reality_nstep_returns,
+                planner_top1_matches=planner_reality_planner_top1_matches,
+                policy_top1_matches=planner_reality_policy_top1_matches,
+                horizon=planner_reality_horizon,
+            )
+            metrics.update(planner_reality_summary)
             if per_task_stats:
                 metrics["per_task"] = per_task_stats
             if repo_pass_flags:
@@ -6411,6 +6615,17 @@ class Trainer:
                 "catastrophic_fail_rate",
                 "constraint_compliance",
                 "reason_counts",
+                "planner_reality_horizon",
+                "planner_reality_steps",
+                "planner_score_nstep_corr",
+                "policy_score_nstep_corr",
+                "planner_score_corr_advantage",
+                "planner_top1_match_rate",
+                "policy_top1_match_rate",
+                "planner_top1_nstep_mean",
+                "planner_non_top1_nstep_mean",
+                "planner_top1_advantage_nstep",
+                "planner_regret_proxy_nstep",
             ):
                 if key in unmasked:
                     results[f"unmasked_{key}"] = unmasked[key]
