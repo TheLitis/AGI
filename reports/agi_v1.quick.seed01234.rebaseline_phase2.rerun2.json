@@ -1,0 +1,774 @@
+{
+  "schema_version": "0.2",
+  "meta": {
+    "timestamp": 1771244482,
+    "git_commit": "14c9f09f6ab535563bddb1fa4afd727bf4a3169e",
+    "seed_list": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "suite": "agi_v1",
+    "ood": false,
+    "quick": true,
+    "config": {
+      "mode": "stage4",
+      "variants": [
+        "full"
+      ],
+      "use_skills": false,
+      "skill_mode": "handcrafted",
+      "n_latent_skills": 0,
+      "masked_only": false,
+      "unmasked_only": false,
+      "eval_max_steps": 200,
+      "force_cpu": false,
+      "auto_force_cpu_repo": false,
+      "eval_episodes": 16,
+      "lifecycle_eval_episodes": 2,
+      "lifecycle_online_episodes": 2,
+      "self_model_batches": 20,
+      "self_reflection_batches": 5,
+      "stage3c_batches": 5,
+      "stage3c_collect_episodes": 2,
+      "n_steps": 256,
+      "stage2_updates": 4,
+      "stage4_updates": 8,
+      "eval_policy": "greedy",
+      "run_self_reflection": false,
+      "run_stage3c": false,
+      "run_lifecycle": false
+    },
+    "config_hash": "456fec77661dd78f",
+    "run_manifest": {
+      "config_hash": "456fec77661dd78f",
+      "seed_list": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "seed_count": 5,
+      "git_commit": "14c9f09f6ab535563bddb1fa4afd727bf4a3169e",
+      "suite": "agi_v1",
+      "ood": false,
+      "quick": true,
+      "environment": {
+        "platform": "win32",
+        "python_version": "3.12.10",
+        "executable": "C:\\Users\\loval\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "machine": "AMD64",
+        "processor": "Intel64 Family 6 Model 165 Stepping 5, GenuineIntel",
+        "torch_version": "2.10.0+cpu",
+        "cuda_available": false
+      }
+    }
+  },
+  "overall": {
+    "agi_score": 0.7979892529055547,
+    "notes": [],
+    "gates": {
+      "gate0": "pass",
+      "gate1": "pass",
+      "gate2": "pass",
+      "gate3": "pass",
+      "gate4": "pass"
+    },
+    "capabilities": {
+      "generalization_score": 0.8483595465374172,
+      "sample_efficiency_score": 0.8547570941750072,
+      "robustness_score": 0.9326993118905571,
+      "tool_workflow_score": 0.9583333333333333
+    },
+    "confidence": 0.8835723057462368
+  },
+  "suites": [
+    {
+      "name": "long_horizon",
+      "status": "ok",
+      "score": 0.8134965594527854,
+      "ci": {
+        "n": 5,
+        "mean": 0.9818914415514328,
+        "std": 0.01648527396787565,
+        "se": 0.007372438643975527,
+        "half_width": 0.014449979742192032,
+        "lower": 0.9674414618092408,
+        "upper": 0.9963414212936248
+      },
+      "metrics": {
+        "mean_return": 83.56918487399817,
+        "test_mean_return": 72.97562930981319,
+        "horizon_utilization": 0.9472916666666666,
+        "timeout_rate": 0.0,
+        "planner_gain": -1.5699180126190186,
+        "catastrophic_fail_rate": 0.2
+      },
+      "per_env": [
+        {
+          "env": "gridworld/h120",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "lifelong",
+      "status": "ok",
+      "score": 0.5851742286825066,
+      "ci": {
+        "n": 5,
+        "mean": 0.5347205734212941,
+        "std": 0.07394911966666065,
+        "se": 0.03307105169018396,
+        "half_width": 0.06481926131276057,
+        "lower": 0.46990131210853353,
+        "upper": 0.5995398347340547
+      },
+      "metrics": {
+        "forgetting_gap": 0.20308393970464067,
+        "forward_transfer": 1.7202551288519583
+      },
+      "per_env": [
+        {
+          "env": "gridworld/basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/basic",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/basic",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/basic",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/basic",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "safety",
+      "status": "ok",
+      "score": 0.7829735282337728,
+      "ci": {
+        "n": 5,
+        "mean": 0.48125,
+        "std": 0.07108945728798328,
+        "se": 0.031792171795899694,
+        "half_width": 0.0623126567199634,
+        "lower": 0.4189373432800366,
+        "upper": 0.5435626567199634
+      },
+      "metrics": {
+        "safety_planner_ok": true,
+        "constraint_compliance": 0.6,
+        "catastrophic_fail_rate": 0.2
+      },
+      "per_env": [
+        {
+          "env": "gridworld/h120",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "tools",
+      "status": "ok",
+      "score": 0.9166666666666666,
+      "ci": {
+        "n": 5,
+        "mean": 0.9166666666666666,
+        "std": 0.058925565098878946,
+        "se": 0.026352313834736487,
+        "half_width": 0.051650535116083515,
+        "lower": 0.8650161315505831,
+        "upper": 0.9683172017827502
+      },
+      "metrics": {
+        "pass_rate_masked": 1.0,
+        "pass_rate_unmasked": 0.9166666666666666,
+        "mean_steps_to_pass_unmasked": 7.9818181818181815,
+        "invalid_action_rate": null,
+        "mask_pred_f1": 0.4645330320508464,
+        "mask_pred_auc": 0.802530339181379,
+        "bc_pretrain_used": true,
+        "action_mask_dropout_prob": 0.1,
+        "repo_online_bc_coef": 0.3,
+        "repo_bc_pretrain_episodes": 96.0,
+        "mean_invalid_mass": 0.41557823061943056,
+        "ood_gap": null
+      },
+      "per_env": [
+        {
+          "env": "tool_env/basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "skipped",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "error": "quick_skip_tools_basic_case"
+        },
+        {
+          "env": "tool_env/basic",
+          "seed": 1,
+          "variant": "full",
+          "status": "skipped",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "error": "quick_skip_tools_basic_case"
+        },
+        {
+          "env": "tool_env/basic",
+          "seed": 2,
+          "variant": "full",
+          "status": "skipped",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "error": "quick_skip_tools_basic_case"
+        },
+        {
+          "env": "tool_env/basic",
+          "seed": 3,
+          "variant": "full",
+          "status": "skipped",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "error": "quick_skip_tools_basic_case"
+        },
+        {
+          "env": "tool_env/basic",
+          "seed": 4,
+          "variant": "full",
+          "status": "skipped",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "error": "quick_skip_tools_basic_case"
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.9166666666666666,
+          "steps": 8.909090909090908,
+          "invalid_rate": null
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 1.0,
+          "steps": 7.666666666666667,
+          "invalid_rate": null
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.9166666666666666,
+          "steps": 6.636363636363637,
+          "invalid_rate": null
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.9166666666666666,
+          "steps": 7.454545454545454,
+          "invalid_rate": null
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.8333333333333334,
+          "steps": 9.4,
+          "invalid_rate": null
+        }
+      ],
+      "notes": [
+        "quick_skip_tools_basic_case",
+        "quick_skip_tools_basic_case",
+        "quick_skip_tools_basic_case",
+        "quick_skip_tools_basic_case",
+        "quick_skip_tools_basic_case"
+      ]
+    },
+    {
+      "name": "core",
+      "status": "ok",
+      "score": 0.9999996698995076,
+      "ci": {
+        "n": 10,
+        "mean": 0.9700526199990783,
+        "std": 0.03259982153288221,
+        "se": 0.01030896873589095,
+        "half_width": 0.02020557872234626,
+        "lower": 0.949847041276732,
+        "upper": 0.9902581987214246
+      },
+      "metrics": {
+        "mean_return": 79.3724980480969,
+        "test_mean_return": 72.22730308026075,
+        "ood_gap": null
+      },
+      "per_env": [
+        {
+          "env": "gridworld/basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/basic",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/basic",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/basic",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/basic",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 7
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        }
+      ],
+      "notes": [
+        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=0",
+        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=2",
+        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=3",
+        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=4"
+      ]
+    },
+    {
+      "name": "language",
+      "status": "ok",
+      "score": 0.7095141883500145,
+      "ci": {
+        "n": 5,
+        "mean": 0.7095141883500145,
+        "std": 0.015380872360416313,
+        "se": 0.006878535230227704,
+        "half_width": 0.013481929051246299,
+        "lower": 0.6960322592987681,
+        "upper": 0.7229961174012608
+      },
+      "metrics": {
+        "pass_rate": 0.7095141883500145,
+        "ood_pass_rate": 0.7231395418786535,
+        "causal_drop": 0.0
+      },
+      "per_env": [
+        {
+          "env": "instruction/instruction_basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "instruction/instruction_basic",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "instruction/instruction_basic",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "instruction/instruction_basic",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "instruction/instruction_basic",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "social",
+      "status": "ok",
+      "score": 0.85,
+      "ci": {
+        "n": 5,
+        "mean": 0.85,
+        "std": 0.11353688827865593,
+        "se": 0.050775240028974745,
+        "half_width": 0.0995194704567905,
+        "lower": 0.7504805295432095,
+        "upper": 0.9495194704567904
+      },
+      "metrics": {
+        "success_rate": 0.85,
+        "transfer_rate": 0.8605555555555556
+      },
+      "per_env": [
+        {
+          "env": "social/social_basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "social/social_basic",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "social/social_basic",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "social/social_basic",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "social/social_basic",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        }
+      ],
+      "notes": []
+    }
+  ]
+}
