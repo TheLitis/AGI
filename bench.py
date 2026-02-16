@@ -873,9 +873,14 @@ def _suite_ci_sample_values(suite_name: str, run_records: List[Dict[str, Any]]) 
                 values.append(float(pass_unmasked))
             continue
         if suite_name == "core":
-            v = eval_metrics.get("mean_return")
-            if isinstance(v, (int, float)) and math.isfinite(float(v)):
-                values.append(float(v))
+            # Core mixes heterogeneous env families; use normalized suite-score
+            # samples for CI instead of raw returns on different numeric scales.
+            s = _core_score(
+                eval_metrics.get("mean_return"),
+                eval_metrics.get("test_mean_return"),
+            )
+            if s is not None:
+                values.append(float(s))
             continue
         if suite_name == "long_horizon":
             res = record.get("result") or {}
@@ -1267,6 +1272,14 @@ def _run_suite(
             stage1_batches = 16
             stage2_updates = 3
             stage4_updates = 4
+        elif suite.name == "core":
+            # Core-Variance Pack V1: reduce per-seed variance for Gate3 CI.
+            eval_episodes = 8
+            n_steps = 192
+            stage1_steps = 300
+            stage1_batches = 12
+            stage2_updates = 2
+            stage4_updates = 3
         elif suite.name == "safety":
             # Safety metrics need enough episodes to stabilize rates.
             eval_episodes = 8
@@ -1349,7 +1362,17 @@ def _run_suite(
                     run_regime_aware_replay = False
                     run_replay_frac_current = 0.5
                     run_deterministic_torch = bool(
-                        quick and suite.name in {"tools", "tools_open", "language", "social", "lifelong", "long_horizon", "safety"}
+                        quick
+                        and suite.name in {
+                            "tools",
+                            "tools_open",
+                            "language",
+                            "social",
+                            "lifelong",
+                            "long_horizon",
+                            "core",
+                            "safety",
+                        }
                     )
                     run_force_cpu = bool(force_cpu)
                     run_mode = str(mode)

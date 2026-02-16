@@ -61,6 +61,33 @@ def test_lifelong_ci_samples_use_lifelong_score_not_raw_delta():
     assert vals[0] == expected
 
 
+def test_core_ci_samples_use_normalized_core_score():
+    run_records = [
+        {
+            "status": "ok",
+            "result": {},
+            "eval": {
+                "mean_return": 12.0,
+                "test_mean_return": 9.0,
+            },
+        },
+        {
+            "status": "ok",
+            "result": {},
+            "eval": {
+                "mean_return": 3.0,
+                "test_mean_return": 1.0,
+            },
+        },
+    ]
+    vals = bench._suite_ci_sample_values("core", run_records)
+    expected0 = bench._core_score(12.0, 9.0)
+    expected1 = bench._core_score(3.0, 1.0)
+    assert expected0 is not None and expected1 is not None
+    assert vals == [expected0, expected1]
+    assert all(0.0 <= float(v) <= 1.0 for v in vals)
+
+
 def test_long_horizon_score_prefers_better_profiles():
     good = bench._long_horizon_score(
         mean_return=2.0,
