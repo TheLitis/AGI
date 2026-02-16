@@ -3101,6 +3101,142 @@ class Trainer:
     #  Multi-step planner
     # =========================
 
+    def _planner_default_env_desc(
+        self,
+        batch_size: int,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        if isinstance(self.env_descriptors, torch.Tensor) and self.env_descriptors.numel() > 0:
+            base = self.env_descriptors[0:1].to(device=device, dtype=dtype)
+            return base.expand(int(batch_size), -1).contiguous()
+        env_dim = int(getattr(self, "env_desc_dim", 0) or 0)
+        if env_dim <= 0:
+            try:
+                first = self.agent.self_model.env_desc_to_emb[0]
+                if isinstance(first, nn.Linear):
+                    env_dim = int(first.in_features)
+            except Exception:
+                env_dim = 1
+        if env_dim <= 0:
+            env_dim = 1
+        return torch.zeros((int(batch_size), int(env_dim)), device=device, dtype=dtype)
+
+    def _planner_step_rewards_from_self(
+        self,
+        *,
+        W_t: torch.Tensor,
+        H_t: torch.Tensor,
+        action_t: torch.Tensor,
+        h_s_prev: torch.Tensor,
+        prev_reward: torch.Tensor,
+        traits_main: torch.Tensor,
+        traits_safety: torch.Tensor,
+        M: torch.Tensor,
+        env_desc: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        batch = int(W_t.shape[0])
+        device = W_t.device
+        dtype = W_t.dtype
+
+        if not isinstance(env_desc, torch.Tensor):
+            env_desc = self._planner_default_env_desc(batch, device=device, dtype=dtype)
+        else:
+            env_desc = env_desc.to(device=device, dtype=dtype)
+            if env_desc.dim() != 2:
+                env_desc = env_desc.reshape(batch, -1)
+            if env_desc.shape[0] == 1 and batch > 1:
+                env_desc = env_desc.expand(batch, -1)
+            elif env_desc.shape[0] != batch:
+                env_desc = self._planner_default_env_desc(batch, device=device, dtype=dtype)
+
+        a_in = action_t.view(-1).to(device=device, dtype=torch.long)
+        if int(a_in.shape[0]) == 1 and batch > 1:
+            a_in = a_in.expand(batch)
+        elif int(a_in.shape[0]) != batch:
+            a_in = a_in[:1].expand(batch)
+
+        if prev_reward.dim() == 1:
+            prev_reward = prev_reward.view(-1, 1)
+        prev_reward = prev_reward.to(device=device, dtype=dtype)
+        if prev_reward.shape[0] == 1 and batch > 1:
+            prev_reward = prev_reward.expand(batch, -1)
+        elif prev_reward.shape[0] != batch:
+            prev_reward = torch.zeros((batch, 1), device=device, dtype=dtype)
+
+        if h_s_prev.shape[1] == 1 and batch > 1:
+            h_s_prev = h_s_prev.expand(1, batch, -1).contiguous()
+        elif h_s_prev.shape[1] != batch:
+            h_s_prev = torch.zeros(
+                1,
+                batch,
+                self.agent.self_model.gru.hidden_size,
+                device=device,
+                dtype=dtype,
+            )
+        else:
+            h_s_prev = h_s_prev.to(device=device, dtype=dtype)
+
+        M_rep = M.to(device=device, dtype=dtype)
+        if M_rep.shape[0] == 1 and batch > 1:
+            M_rep = M_rep.expand(batch, -1)
+        elif M_rep.shape[0] != batch:
+            M_rep = M_rep[:1].expand(batch, -1)
+
+        traits_main_rep = traits_main.to(device=device, dtype=dtype)
+        if traits_main_rep.shape[0] == 1 and batch > 1:
+            traits_main_rep = traits_main_rep.expand(batch, -1)
+        elif traits_main_rep.shape[0] != batch:
+            traits_main_rep = traits_main_rep[:1].expand(batch, -1)
+
+        traits_safety_rep = traits_safety.to(device=device, dtype=dtype)
+        if traits_safety_rep.shape[0] == 1 and batch > 1:
+            traits_safety_rep = traits_safety_rep.expand(batch, -1)
+        elif traits_safety_rep.shape[0] != batch:
+            traits_safety_rep = traits_safety_rep[:1].expand(batch, -1)
+
+        a_emb = self.agent.self_model.act_emb(a_in)
+        env_emb = self.agent.self_model.env_desc_to_emb(env_desc)
+        x_s = torch.cat(
+            [
+                W_t.unsqueeze(1),
+                H_t.unsqueeze(1),
+                prev_reward.unsqueeze(1),
+                a_emb.unsqueeze(1),
+                M_rep.unsqueeze(1),
+                env_emb.unsqueeze(1),
+            ],
+            dim=-1,
+        )
+        out_s, h_s_next = self.agent.self_model.gru(x_s, h_s_prev)
+        S_t = out_s.squeeze(1)
+
+        surv_t = torch.sigmoid(self.agent.self_model.head_survival(S_t))
+        food_t = self.agent.self_model.head_food(S_t)
+        dmg_t = self.agent.self_model.head_damage(S_t)
+        move_t = self.agent.self_model.head_move(S_t)
+
+        w_main = traits_to_preference_weights(traits_main_rep)
+        w_safety = traits_to_preference_weights(traits_safety_rep)
+
+        utility_main = (
+            w_main[:, 0:1] * surv_t
+            + w_main[:, 1:2] * food_t
+            + w_main[:, 2:3] * dmg_t
+            + w_main[:, 3:4] * move_t
+        )
+        utility_safety = (
+            w_safety[:, 0:1] * surv_t
+            + w_safety[:, 1:2] * food_t
+            + w_safety[:, 2:3] * dmg_t
+            + w_safety[:, 3:4] * move_t
+        )
+        reward_main = self.agent.self_model.head_return_calib(utility_main).view(-1)
+        reward_safety = self.agent.self_model.head_return_calib(utility_safety).view(-1)
+        next_prev_reward = reward_main.view(-1, 1).detach()
+        return reward_main, reward_safety, h_s_next, next_prev_reward
+
     def compute_planner_logits(
         self,
         z_obs: torch.Tensor,      # (1, obs_dim)
@@ -3114,7 +3250,8 @@ class Trainer:
         """
         Multi-step planner v1 ("repeat"):
           - repeats action a for horizon steps via world model rollout;
-          - scores with ValueModel under main + safety traits and applies safety penalty.
+          - accumulates imagined self-reward under main + safety traits;
+          - adds a tail ValueModel bootstrap and applies safety penalty.
         """
         device = z_obs.device
         A = self.env.n_actions
@@ -3136,20 +3273,47 @@ class Trainer:
         traits_safety = self._safety_traits()
         traits_rep_safety = traits_safety.expand(A, -1)
         M_rep = M.expand(A, -1)
+        env_desc_rep = self._planner_default_env_desc(A, device=device, dtype=H.dtype)
 
-        for t in range(horizon):
+        h_s_local = torch.zeros(
+            1,
+            A,
+            self.agent.self_model.gru.hidden_size,
+            device=device,
+            dtype=H.dtype,
+        )
+        r_prev = torch.zeros(A, 1, device=device, dtype=H.dtype)
+        disc = torch.ones(A, device=device, dtype=H.dtype)
+        W_last = None
+
+        for _ in range(horizon):
             w_t, h_w_local, z_hat, H_hat = self.agent.world_model.forward_step(
                 z, H, a_cand, h_w_local
             )
-
-            V_main = self.agent.value_model(w_t, H_hat, traits_rep, M_rep).squeeze(-1)
-            V_safety = self.agent.value_model(w_t, H_hat, traits_rep_safety, M_rep).squeeze(-1)
-
-            scores_main = scores_main + (gamma ** t) * V_main
-            scores_safety = scores_safety + (gamma ** t) * V_safety
+            reward_main, reward_safety, h_s_local, r_prev = self._planner_step_rewards_from_self(
+                W_t=w_t,
+                H_t=H_hat,
+                action_t=a_cand,
+                h_s_prev=h_s_local,
+                prev_reward=r_prev,
+                traits_main=traits_rep,
+                traits_safety=traits_rep_safety,
+                M=M_rep,
+                env_desc=env_desc_rep,
+            )
+            scores_main = scores_main + disc * reward_main
+            scores_safety = scores_safety + disc * reward_safety
+            disc = disc * gamma
 
             z = z_hat.detach()
             H = H_hat.detach()
+            W_last = w_t
+
+        if isinstance(W_last, torch.Tensor):
+            V_main_tail = self.agent.value_model(W_last, H, traits_rep, M_rep).squeeze(-1)
+            V_safety_tail = self.agent.value_model(W_last, H, traits_rep_safety, M_rep).squeeze(-1)
+            scores_main = scores_main + disc * V_main_tail
+            scores_safety = scores_safety + disc * V_safety_tail
 
         penalized = self._apply_safety_penalty(scores_main, scores_safety)
         penalized = penalized - penalized.mean()
@@ -3194,18 +3358,45 @@ class Trainer:
                 scores.append(0.0)
                 continue
             h_w_local = h_w.clone()
+            h_s_local = torch.zeros(
+                1,
+                1,
+                self.agent.self_model.gru.hidden_size,
+                device=self.device,
+                dtype=H_t.dtype,
+            )
+            r_prev = torch.zeros(1, 1, device=self.device, dtype=H_t.dtype)
             z_cur = z_obs
             H_cur = H_t
+            disc = 1.0
             score = 0.0
+            W_last = None
+            H_last = None
             for a in seq:
                 a_t = torch.tensor([int(a)], device=self.device)
                 w_t, h_w_local, z_hat, H_hat = self.agent.world_model.forward_step(
                     z_cur, H_cur, a_t, h_w_local
                 )
-                V_pi = self.agent.value_model(w_t, H_cur, traits, M)
-                score += float(V_pi.item())
+                reward_main, _reward_safety, h_s_local, r_prev = self._planner_step_rewards_from_self(
+                    W_t=w_t,
+                    H_t=H_hat,
+                    action_t=a_t,
+                    h_s_prev=h_s_local,
+                    prev_reward=r_prev,
+                    traits_main=traits,
+                    traits_safety=traits,
+                    M=M,
+                    env_desc=env_desc,
+                )
+                score += float(disc * float(reward_main.item()))
+                disc *= float(self.planner_gamma)
                 z_cur = z_hat.detach()
                 H_cur = H_hat.detach()
+                W_last = w_t
+                H_last = H_hat
+            if isinstance(W_last, torch.Tensor) and isinstance(H_last, torch.Tensor):
+                V_pi = self.agent.value_model(W_last, H_last, traits, M)
+                score += float(disc * float(V_pi.item()))
             scores.append(score)
         scores_t = torch.tensor(scores, device=self.device).unsqueeze(0)
         scores_t = scores_t - scores_t.mean()
@@ -3226,7 +3417,7 @@ class Trainer:
         M: torch.Tensor,       # (1, mem_dim)
     ) -> torch.Tensor:
         """
-        Batched multi-step planner ("rollout") with safety-aware scoring.
+        Batched multi-step planner ("rollout") with reward-aware safety scoring.
         """
         A = self.env.n_actions
         R = self.planner_rollouts
@@ -3247,23 +3438,42 @@ class Trainer:
             traits_safety = self._safety_traits()
             traits_rep_safety = traits_safety.expand(batch, -1)
             M_rep = M.expand(batch, -1)
+            env_desc_rep = self._planner_default_env_desc(batch, device=device, dtype=H_cur.dtype)
 
             a = torch.arange(A, device=device).repeat_interleave(R)
             scores_main = torch.zeros(batch, device=device)
             scores_safety = torch.zeros(batch, device=device)
             disc = torch.ones(batch, device=device)
+            h_s_cur = torch.zeros(
+                1,
+                batch,
+                self.agent.self_model.gru.hidden_size,
+                device=device,
+                dtype=H_cur.dtype,
+            )
+            r_prev = torch.zeros(batch, 1, device=device, dtype=H_cur.dtype)
+            W_last = None
 
             for _ in range(H):
                 W, h_cur, z_hat, H_hat = self.agent.world_model.forward_step(
                     z, H_cur, a, h_cur
                 )
-
-                V_main = self.agent.value_model(W, H_hat, traits_rep, M_rep).view(-1)
-                V_safety = self.agent.value_model(W, H_hat, traits_rep_safety, M_rep).view(-1)
-                scores_main = scores_main + disc * V_main
-                scores_safety = scores_safety + disc * V_safety
+                reward_main, reward_safety, h_s_cur, r_prev = self._planner_step_rewards_from_self(
+                    W_t=W,
+                    H_t=H_hat,
+                    action_t=a,
+                    h_s_prev=h_s_cur,
+                    prev_reward=r_prev,
+                    traits_main=traits_rep,
+                    traits_safety=traits_rep_safety,
+                    M=M_rep,
+                    env_desc=env_desc_rep,
+                )
+                scores_main = scores_main + disc * reward_main
+                scores_safety = scores_safety + disc * reward_safety
                 disc = disc * gamma
 
+                V_main = self.agent.value_model(W, H_hat, traits_rep, M_rep).view(-1)
                 S_zero = torch.zeros(
                     batch,
                     self.agent.self_model.gru.hidden_size,
@@ -3288,6 +3498,13 @@ class Trainer:
 
                 z = z_hat.detach()
                 H_cur = H_hat.detach()
+                W_last = W
+
+            if isinstance(W_last, torch.Tensor):
+                V_main_tail = self.agent.value_model(W_last, H_cur, traits_rep, M_rep).view(-1)
+                V_safety_tail = self.agent.value_model(W_last, H_cur, traits_rep_safety, M_rep).view(-1)
+                scores_main = scores_main + disc * V_main_tail
+                scores_safety = scores_safety + disc * V_safety_tail
 
             q_main = scores_main.view(A, R).mean(dim=1)
             q_safety = scores_safety.view(A, R).mean(dim=1)
@@ -3332,20 +3549,37 @@ class Trainer:
             q_main = torch.zeros(A, device=device, dtype=z_obs.dtype)
             q_safety = torch.zeros(A, device=device, dtype=z_obs.dtype)
 
-            threshold = torch.as_tensor(self.safety_threshold, device=device, dtype=z_obs.dtype)
-            coef = float(self.safety_penalty_coef)
-
             for a0 in range(A):
                 a0_t = torch.tensor([int(a0)], device=device, dtype=torch.long)
                 W0, h_cur, z_cur, H_cur = self.agent.world_model.forward_step(z_obs, H_t, a0_t, h_w)
-                V0_main = self.agent.value_model(W0, H_cur, traits_main, M).view(-1)
-                V0_safety = self.agent.value_model(W0, H_cur, traits_safety, M).view(-1)
+                h_s_cur = torch.zeros(
+                    1,
+                    1,
+                    self.agent.self_model.gru.hidden_size,
+                    device=device,
+                    dtype=H_cur.dtype,
+                )
+                r_prev = torch.zeros(1, 1, device=device, dtype=H_cur.dtype)
+                env_desc_cur = self._planner_default_env_desc(1, device=device, dtype=H_cur.dtype)
+                r0_main, r0_safety, h_s_cur, r_prev = self._planner_step_rewards_from_self(
+                    W_t=W0,
+                    H_t=H_cur,
+                    action_t=a0_t,
+                    h_s_prev=h_s_cur,
+                    prev_reward=r_prev,
+                    traits_main=traits_main,
+                    traits_safety=traits_safety,
+                    M=M,
+                    env_desc=env_desc_cur,
+                )
 
                 beam_z = z_cur.detach()
                 beam_H = H_cur.detach()
                 beam_h = h_cur.detach()
-                beam_main = V0_main.clone()
-                beam_safety = V0_safety.clone()
+                beam_hs = h_s_cur.detach()
+                beam_prev_r = r_prev.detach()
+                beam_main = r0_main.clone()
+                beam_safety = r0_safety.clone()
 
                 disc = gamma
                 for _ in range(1, H):
@@ -3353,6 +3587,8 @@ class Trainer:
                     z_rep = beam_z.repeat_interleave(A, dim=0)
                     H_rep = beam_H.repeat_interleave(A, dim=0)
                     h_rep = beam_h.repeat_interleave(A, dim=1)
+                    hs_rep = beam_hs.repeat_interleave(A, dim=1)
+                    r_prev_rep = beam_prev_r.repeat_interleave(A, dim=0)
                     a_rep = torch.arange(A, device=device, dtype=torch.long).repeat(beam_size)
 
                     Wn, h_next, z_next, H_next = self.agent.world_model.forward_step(z_rep, H_rep, a_rep, h_rep)
@@ -3360,15 +3596,28 @@ class Trainer:
                     traits_rep = traits_main.expand(n, -1)
                     traits_rep_safety = traits_safety.expand(n, -1)
                     M_rep = M.expand(n, -1)
+                    env_desc_rep = self._planner_default_env_desc(n, device=device, dtype=H_next.dtype)
 
-                    V_main = self.agent.value_model(Wn, H_next, traits_rep, M_rep).view(-1)
-                    V_safety = self.agent.value_model(Wn, H_next, traits_rep_safety, M_rep).view(-1)
+                    r_main, r_safety, hs_next, r_next = self._planner_step_rewards_from_self(
+                        W_t=Wn,
+                        H_t=H_next,
+                        action_t=a_rep,
+                        h_s_prev=hs_rep,
+                        prev_reward=r_prev_rep,
+                        traits_main=traits_rep,
+                        traits_safety=traits_rep_safety,
+                        M=M_rep,
+                        env_desc=env_desc_rep,
+                    )
 
-                    main_new = beam_main.repeat_interleave(A) + disc * V_main
-                    safety_new = beam_safety.repeat_interleave(A) + disc * V_safety
+                    main_new = beam_main.repeat_interleave(A) + disc * r_main
+                    safety_new = beam_safety.repeat_interleave(A) + disc * r_safety
 
-                    gap = torch.clamp(threshold - safety_new, min=0.0)
-                    penalized = main_new - coef * gap
+                    V_main_tail = self.agent.value_model(Wn, H_next, traits_rep, M_rep).view(-1)
+                    V_safety_tail = self.agent.value_model(Wn, H_next, traits_rep_safety, M_rep).view(-1)
+                    main_rank = main_new + (disc * gamma) * V_main_tail
+                    safety_rank = safety_new + (disc * gamma) * V_safety_tail
+                    penalized = self._apply_safety_penalty(main_rank, safety_rank)
                     k = int(min(B, int(penalized.numel())))
                     top = torch.topk(penalized, k=k)
                     idx = top.indices
@@ -3376,15 +3625,29 @@ class Trainer:
                     beam_z = z_next[idx].detach()
                     beam_H = H_next[idx].detach()
                     beam_h = h_next[:, idx, :].detach()
+                    beam_hs = hs_next[:, idx, :].detach()
+                    beam_prev_r = r_next[idx].detach().view(-1, 1)
                     beam_main = main_new[idx]
                     beam_safety = safety_new[idx]
                     disc = disc * gamma
 
-                gap = torch.clamp(threshold - beam_safety, min=0.0)
-                penalized = beam_main - coef * gap
+                beam_n = int(beam_main.numel())
+                if beam_n > 0:
+                    traits_rep = traits_main.expand(beam_n, -1)
+                    traits_rep_safety = traits_safety.expand(beam_n, -1)
+                    M_rep = M.expand(beam_n, -1)
+                    W_tail = beam_h.squeeze(0)
+                    V_main_tail = self.agent.value_model(W_tail, beam_H, traits_rep, M_rep).view(-1)
+                    V_safety_tail = self.agent.value_model(W_tail, beam_H, traits_rep_safety, M_rep).view(-1)
+                    final_main = beam_main + disc * V_main_tail
+                    final_safety = beam_safety + disc * V_safety_tail
+                else:
+                    final_main = beam_main
+                    final_safety = beam_safety
+                penalized = self._apply_safety_penalty(final_main, final_safety)
                 best = int(torch.argmax(penalized).item()) if penalized.numel() > 0 else 0
-                q_main[a0] = beam_main[best]
-                q_safety[a0] = beam_safety[best]
+                q_main[a0] = final_main[best]
+                q_safety[a0] = final_safety[best]
 
             penalized = self._apply_safety_penalty(q_main, q_safety)
             penalized = penalized - penalized.mean()
