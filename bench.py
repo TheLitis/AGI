@@ -451,6 +451,14 @@ SUITE_METRICS_KEYS: Dict[str, List[str]] = {
         "goal_completion_rate",
         "mean_steps_to_goal",
         "planner_gain",
+        "planner_reality_steps",
+        "planner_score_nstep_corr",
+        "policy_score_nstep_corr",
+        "planner_score_corr_advantage",
+        "planner_top1_match_rate",
+        "policy_top1_match_rate",
+        "planner_top1_advantage_nstep",
+        "planner_regret_proxy_nstep",
         "catastrophic_fail_rate",
     ],
     "core": [
@@ -822,6 +830,40 @@ def _long_horizon_metrics_from_eval(
     timeout_rate_unit = _as_unit_rate(timeout_rate)
     catastrophic_rate = _as_unit_rate(eval_metrics.get("catastrophic_fail_rate"))
     return horizon_utilization, timeout_rate_unit, catastrophic_rate
+
+
+def _planner_reality_metrics_from_eval(eval_metrics: Optional[Dict[str, Any]]) -> Dict[str, Optional[float]]:
+    out: Dict[str, Optional[float]] = {
+        "planner_reality_steps": None,
+        "planner_score_nstep_corr": None,
+        "policy_score_nstep_corr": None,
+        "planner_score_corr_advantage": None,
+        "planner_top1_match_rate": None,
+        "policy_top1_match_rate": None,
+        "planner_top1_advantage_nstep": None,
+        "planner_regret_proxy_nstep": None,
+    }
+    if not isinstance(eval_metrics, dict):
+        return out
+
+    steps = eval_metrics.get("planner_reality_steps")
+    if isinstance(steps, (int, float)) and math.isfinite(float(steps)) and float(steps) >= 0.0:
+        out["planner_reality_steps"] = float(steps)
+
+    for k in (
+        "planner_score_nstep_corr",
+        "policy_score_nstep_corr",
+        "planner_score_corr_advantage",
+        "planner_top1_advantage_nstep",
+        "planner_regret_proxy_nstep",
+    ):
+        v = eval_metrics.get(k)
+        if isinstance(v, (int, float)) and math.isfinite(float(v)):
+            out[k] = float(v)
+
+    out["planner_top1_match_rate"] = _as_unit_rate(eval_metrics.get("planner_top1_match_rate"))
+    out["policy_top1_match_rate"] = _as_unit_rate(eval_metrics.get("policy_top1_match_rate"))
+    return out
 
 
 def _long_horizon_score(
@@ -1810,6 +1852,14 @@ def _run_suite(
         goal_steps_vals: List[float] = []
         horizon_steps_vals: List[int] = []
         planner_gain_vals: List[float] = []
+        planner_reality_steps_vals: List[float] = []
+        planner_corr_vals: List[float] = []
+        policy_corr_vals: List[float] = []
+        planner_corr_adv_vals: List[float] = []
+        planner_top1_match_vals: List[float] = []
+        policy_top1_match_vals: List[float] = []
+        planner_top1_adv_vals: List[float] = []
+        planner_regret_proxy_vals: List[float] = []
         catastrophic_vals: List[float] = []
         for record in run_records:
             if record.get("status") != "ok":
@@ -1848,6 +1898,23 @@ def _run_suite(
                 timeout_vals.append(float(timeout_rate))
             if catastrophic_rate is not None:
                 catastrophic_vals.append(float(catastrophic_rate))
+            planner_reality = _planner_reality_metrics_from_eval(eval_metrics)
+            if planner_reality.get("planner_reality_steps") is not None:
+                planner_reality_steps_vals.append(float(planner_reality["planner_reality_steps"]))
+            if planner_reality.get("planner_score_nstep_corr") is not None:
+                planner_corr_vals.append(float(planner_reality["planner_score_nstep_corr"]))
+            if planner_reality.get("policy_score_nstep_corr") is not None:
+                policy_corr_vals.append(float(planner_reality["policy_score_nstep_corr"]))
+            if planner_reality.get("planner_score_corr_advantage") is not None:
+                planner_corr_adv_vals.append(float(planner_reality["planner_score_corr_advantage"]))
+            if planner_reality.get("planner_top1_match_rate") is not None:
+                planner_top1_match_vals.append(float(planner_reality["planner_top1_match_rate"]))
+            if planner_reality.get("policy_top1_match_rate") is not None:
+                policy_top1_match_vals.append(float(planner_reality["policy_top1_match_rate"]))
+            if planner_reality.get("planner_top1_advantage_nstep") is not None:
+                planner_top1_adv_vals.append(float(planner_reality["planner_top1_advantage_nstep"]))
+            if planner_reality.get("planner_regret_proxy_nstep") is not None:
+                planner_regret_proxy_vals.append(float(planner_reality["planner_regret_proxy_nstep"]))
             if not isinstance(res, dict):
                 continue
             stage_metrics = res.get("stage_metrics", {})
@@ -1884,6 +1951,14 @@ def _run_suite(
                 "goal_completion_rate": goal_completion_rate,
                 "mean_steps_to_goal": mean_steps_to_goal,
                 "planner_gain": planner_gain,
+                "planner_reality_steps": _safe_mean(planner_reality_steps_vals),
+                "planner_score_nstep_corr": _safe_mean(planner_corr_vals),
+                "policy_score_nstep_corr": _safe_mean(policy_corr_vals),
+                "planner_score_corr_advantage": _safe_mean(planner_corr_adv_vals),
+                "planner_top1_match_rate": _safe_mean(planner_top1_match_vals),
+                "policy_top1_match_rate": _safe_mean(policy_top1_match_vals),
+                "planner_top1_advantage_nstep": _safe_mean(planner_top1_adv_vals),
+                "planner_regret_proxy_nstep": _safe_mean(planner_regret_proxy_vals),
                 "catastrophic_fail_rate": catastrophic_rate,
             }
         )

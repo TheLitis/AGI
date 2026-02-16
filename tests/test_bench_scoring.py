@@ -265,3 +265,34 @@ def test_tools_metrics_template_exposes_repo_bc_runtime_config():
     tpl = bench._metric_template("tools")
     assert "repo_online_bc_coef" in tpl
     assert "repo_bc_pretrain_episodes" in tpl
+
+
+def test_long_horizon_metrics_template_exposes_planner_reality_fields():
+    tpl = bench._metric_template("long_horizon")
+    assert "planner_reality_steps" in tpl
+    assert "planner_score_nstep_corr" in tpl
+    assert "planner_top1_match_rate" in tpl
+    assert "planner_regret_proxy_nstep" in tpl
+
+
+def test_planner_reality_metrics_from_eval_sanitizes_values():
+    metrics = bench._planner_reality_metrics_from_eval(
+        {
+            "planner_reality_steps": 12,
+            "planner_score_nstep_corr": 0.7,
+            "policy_score_nstep_corr": -0.2,
+            "planner_score_corr_advantage": 0.9,
+            "planner_top1_match_rate": 1.2,
+            "policy_top1_match_rate": -0.5,
+            "planner_top1_advantage_nstep": 0.4,
+            "planner_regret_proxy_nstep": 0.3,
+        }
+    )
+    assert metrics["planner_reality_steps"] == 12.0
+    assert metrics["planner_score_nstep_corr"] == 0.7
+    assert metrics["policy_score_nstep_corr"] == -0.2
+    assert metrics["planner_score_corr_advantage"] == 0.9
+    assert metrics["planner_top1_match_rate"] == 1.0
+    assert metrics["policy_top1_match_rate"] == 0.0
+    assert metrics["planner_top1_advantage_nstep"] == 0.4
+    assert metrics["planner_regret_proxy_nstep"] == 0.3
