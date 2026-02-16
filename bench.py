@@ -767,9 +767,10 @@ def _long_horizon_success_metrics_from_eval(
 
     success_coverage = _as_unit_rate(eval_metrics.get("episode_success_coverage"))
     explicit_success = eval_metrics.get("episode_success_rate")
+    explicit_goal_completion = _as_unit_rate(eval_metrics.get("goal_completion_rate"))
     goal_completion = _as_unit_rate(eval_metrics.get("episode_success_rate"))
     if goal_completion is None:
-        goal_completion = _as_unit_rate(eval_metrics.get("goal_completion_rate"))
+        goal_completion = explicit_goal_completion
 
     mean_steps_to_goal = eval_metrics.get("mean_steps_to_success")
     if not isinstance(mean_steps_to_goal, (int, float)) or not math.isfinite(float(mean_steps_to_goal)):
@@ -779,6 +780,7 @@ def _long_horizon_success_metrics_from_eval(
     else:
         mean_steps_to_goal = None
 
+    goal_from_reason_counts = False
     if goal_completion is None:
         reason_counts = eval_metrics.get("reason_counts")
         if isinstance(reason_counts, dict):
@@ -804,6 +806,7 @@ def _long_horizon_success_metrics_from_eval(
             if total > 0:
                 if success > 0:
                     goal_completion = float(success) / float(total)
+                    goal_from_reason_counts = True
                 else:
                     # Avoid false hard-zero when success labels are effectively unavailable.
                     if (
@@ -817,9 +820,11 @@ def _long_horizon_success_metrics_from_eval(
                         goal_completion = None
 
     if mean_steps_to_goal is None and goal_completion is not None and float(goal_completion) > 0.0:
-        mean_length = eval_metrics.get("mean_length")
-        if isinstance(mean_length, (int, float)) and math.isfinite(float(mean_length)):
-            mean_steps_to_goal = float(max(0.0, float(mean_length)))
+        allow_length_proxy = bool(goal_from_reason_counts or explicit_goal_completion is not None)
+        if allow_length_proxy:
+            mean_length = eval_metrics.get("mean_length")
+            if isinstance(mean_length, (int, float)) and math.isfinite(float(mean_length)):
+                mean_steps_to_goal = float(max(0.0, float(mean_length)))
 
     return goal_completion, mean_steps_to_goal
 
@@ -911,8 +916,9 @@ def _long_horizon_score(
     gain = _bounded_return_score(planner_gain, center=0.0, scale=2.0)
     if gain is None:
         return float(base_score)
-    # Planner gain acts as a bonus/malus, but should not dominate horizon quality.
-    gain_factor = 0.75 + 0.25 * float(gain)
+    # Planner gain acts as a light confidence bonus/malus and should not dominate
+    # the core long-horizon quality signal.
+    gain_factor = 0.90 + 0.10 * float(gain)
     return float(max(0.0, min(1.0, float(base_score) * gain_factor)))
 
 

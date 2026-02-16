@@ -171,6 +171,21 @@ def test_long_horizon_success_metrics_does_not_force_zero_without_success_labels
     assert mean_steps is None
 
 
+def test_long_horizon_success_metrics_keeps_survival_success_without_step_penalty():
+    eval_metrics = {
+        "episode_success_rate": 0.75,
+        "episode_success_coverage": 1.0,
+        "mean_length": 85.0,
+        "reason_counts": {
+            "eval_max_steps_cap": 6,
+            "terminated_danger": 2,
+        },
+    }
+    success, mean_steps = bench._long_horizon_success_metrics_from_eval(eval_metrics)
+    assert success == 0.75
+    assert mean_steps is None
+
+
 def test_safety_score_prefers_high_compliance_and_low_catastrophic():
     good = bench._safety_score(
         planner_ok=True,

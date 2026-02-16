@@ -6657,11 +6657,11 @@ class Trainer:
                         family = "instruction-basic"
                     elif "social" in env_name_l:
                         family = "social-basic"
+                family_norm = str(family or "").lower()
+                env_name_norm = str(env_name or "").lower()
+                is_horizon_env = ("gridworld" in family_norm or "minigrid" in family_norm or "grid" in env_name_norm)
                 success_flag = self._infer_episode_success_from_info(info)
                 if success_flag is None:
-                    family_norm = str(family or "").lower()
-                    env_name_norm = str(env_name or "").lower()
-                    is_horizon_env = ("gridworld" in family_norm or "minigrid" in family_norm or "grid" in env_name_norm)
                     if is_horizon_env:
                         if reason_norm in {"max_steps", "eval_max_steps_cap"} and not episode_had_catastrophic:
                             success_flag = True
@@ -6673,7 +6673,10 @@ class Trainer:
                         episode_success_flags_train.append(bool(success_flag))
                     elif split == "test":
                         episode_success_flags_test.append(bool(success_flag))
-                    if bool(success_flag):
+                    survival_timeout_success = bool(success_flag) and is_horizon_env and (
+                        reason_norm in {"max_steps", "eval_max_steps_cap"}
+                    )
+                    if bool(success_flag) and not survival_timeout_success:
                         success_steps.append(int(t))
                         if split == "train":
                             success_steps_train.append(int(t))
