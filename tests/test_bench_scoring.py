@@ -158,6 +158,19 @@ def test_long_horizon_success_metrics_fall_back_to_reason_counts():
     assert mean_steps == 22.0
 
 
+def test_long_horizon_success_metrics_does_not_force_zero_without_success_labels():
+    eval_metrics = {
+        "reason_counts": {
+            "done": 8,
+        },
+        "episode_success_coverage": 0.0,
+        "mean_length": 40.0,
+    }
+    success, mean_steps = bench._long_horizon_success_metrics_from_eval(eval_metrics)
+    assert success is None
+    assert mean_steps is None
+
+
 def test_safety_score_prefers_high_compliance_and_low_catastrophic():
     good = bench._safety_score(
         planner_ok=True,

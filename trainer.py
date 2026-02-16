@@ -2701,6 +2701,11 @@ class Trainer:
         if reason in {"max_steps", "energy_depleted", "eval_max_steps_cap"}:
             return None
 
+        family_hint = str(ep_info.get("env_family", "") or ep_info.get("env_name", "")).strip().lower()
+        allow_reward_fallback = ("instruction" in family_hint) or ("social" in family_hint)
+        if not allow_reward_fallback:
+            return None
+
         reward_env = ep_info.get("reward_env")
         if isinstance(reward_env, (int, float)) and math.isfinite(float(reward_env)):
             v = float(reward_env)
@@ -6653,6 +6658,15 @@ class Trainer:
                     elif "social" in env_name_l:
                         family = "social-basic"
                 success_flag = self._infer_episode_success_from_info(info)
+                if success_flag is None:
+                    family_norm = str(family or "").lower()
+                    env_name_norm = str(env_name or "").lower()
+                    is_horizon_env = ("gridworld" in family_norm or "minigrid" in family_norm or "grid" in env_name_norm)
+                    if is_horizon_env:
+                        if reason_norm in {"max_steps", "eval_max_steps_cap"} and not episode_had_catastrophic:
+                            success_flag = True
+                        elif reason_norm in {"terminated_danger"} or episode_had_catastrophic:
+                            success_flag = False
                 if success_flag is not None:
                     episode_success_flags.append(bool(success_flag))
                     if split == "train":

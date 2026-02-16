@@ -18,9 +18,10 @@ def test_episode_success_uses_reason_labels():
 
 
 def test_episode_success_falls_back_to_reward_sign():
-    assert Trainer._infer_episode_success_from_info({"reward_env": 0.2}) is True
-    assert Trainer._infer_episode_success_from_info({"reward_env": -0.2}) is False
-    assert Trainer._infer_episode_success_from_info({"reward_env": 0.0}) is None
+    assert Trainer._infer_episode_success_from_info({"env_family": "instruction-basic", "reward_env": 0.2}) is True
+    assert Trainer._infer_episode_success_from_info({"env_family": "social-basic", "reward_env": -0.2}) is False
+    assert Trainer._infer_episode_success_from_info({"env_family": "instruction-basic", "reward_env": 0.0}) is None
+    assert Trainer._infer_episode_success_from_info({"env_family": "gridworld", "reward_env": 0.2}) is None
 
 
 def test_episode_success_prefers_explicit_instruction_and_social_flags():

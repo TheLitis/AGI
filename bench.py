@@ -765,6 +765,8 @@ def _long_horizon_success_metrics_from_eval(
     if not isinstance(eval_metrics, dict):
         return None, None
 
+    success_coverage = _as_unit_rate(eval_metrics.get("episode_success_coverage"))
+    explicit_success = eval_metrics.get("episode_success_rate")
     goal_completion = _as_unit_rate(eval_metrics.get("episode_success_rate"))
     if goal_completion is None:
         goal_completion = _as_unit_rate(eval_metrics.get("goal_completion_rate"))
@@ -800,7 +802,19 @@ def _long_horizon_success_metrics_from_eval(
                 if reason in success_reasons:
                     success += count
             if total > 0:
-                goal_completion = float(success) / float(total)
+                if success > 0:
+                    goal_completion = float(success) / float(total)
+                else:
+                    # Avoid false hard-zero when success labels are effectively unavailable.
+                    if (
+                        success_coverage is not None
+                        and success_coverage >= 0.5
+                        and isinstance(explicit_success, (int, float))
+                        and math.isfinite(float(explicit_success))
+                    ):
+                        goal_completion = 0.0
+                    else:
+                        goal_completion = None
 
     if mean_steps_to_goal is None and goal_completion is not None and float(goal_completion) > 0.0:
         mean_length = eval_metrics.get("mean_length")
