@@ -9,7 +9,11 @@ def test_episode_success_prefers_explicit_repo_flag():
 def test_episode_success_uses_reason_labels():
     assert Trainer._infer_episode_success_from_info({"reason": "took_correct_goal"}) is True
     assert Trainer._infer_episode_success_from_info({"reason": "you_got_food"}) is True
+    assert Trainer._infer_episode_success_from_info({"reason": "goal_reached"}) is True
+    assert Trainer._infer_episode_success_from_info({"reason": "reached_target"}) is True
     assert Trainer._infer_episode_success_from_info({"reason": "took_wrong_goal"}) is False
+    assert Trainer._infer_episode_success_from_info({"reason": "terminated_danger"}) is False
+    assert Trainer._infer_episode_success_from_info({"reason": "pytest_timeout"}) is False
     assert Trainer._infer_episode_success_from_info({"reason": "max_steps"}) is None
 
 

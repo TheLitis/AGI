@@ -448,6 +448,8 @@ SUITE_METRICS_KEYS: Dict[str, List[str]] = {
         "test_mean_return",
         "horizon_utilization",
         "timeout_rate",
+        "goal_completion_rate",
+        "mean_steps_to_goal",
         "planner_gain",
         "catastrophic_fail_rate",
     ],
@@ -539,9 +541,17 @@ def _eval_quality_score(eval_metrics: Optional[Dict[str, Any]], suite_name: Opti
     name = str(suite_name or "").strip().lower()
     if name == "long_horizon":
         horizon_util, timeout_rate, _ = _long_horizon_metrics_from_eval(eval_metrics)
+        goal_completion, mean_steps_to_goal = _long_horizon_success_metrics_from_eval(eval_metrics)
+        horizon_steps = None
+        max_steps = eval_metrics.get("max_steps")
+        if isinstance(max_steps, (int, float)) and math.isfinite(float(max_steps)):
+            horizon_steps = int(float(max_steps))
         score = _long_horizon_score(
             mean_return=eval_metrics.get("mean_return"),
             horizon_utilization=horizon_util,
+            goal_completion_rate=goal_completion,
+            mean_steps_to_goal=mean_steps_to_goal,
+            horizon_steps=horizon_steps,
             planner_gain=None,
             timeout_rate=timeout_rate,
         )
@@ -735,6 +745,57 @@ def _social_score(success_rate: Optional[float], transfer_rate: Optional[float])
     return float(min(s, t))
 
 
+def _long_horizon_success_metrics_from_eval(
+    eval_metrics: Optional[Dict[str, Any]],
+) -> Tuple[Optional[float], Optional[float]]:
+    if not isinstance(eval_metrics, dict):
+        return None, None
+
+    goal_completion = _as_unit_rate(eval_metrics.get("episode_success_rate"))
+    if goal_completion is None:
+        goal_completion = _as_unit_rate(eval_metrics.get("goal_completion_rate"))
+
+    mean_steps_to_goal = eval_metrics.get("mean_steps_to_success")
+    if not isinstance(mean_steps_to_goal, (int, float)) or not math.isfinite(float(mean_steps_to_goal)):
+        mean_steps_to_goal = eval_metrics.get("mean_steps_to_goal")
+    if isinstance(mean_steps_to_goal, (int, float)) and math.isfinite(float(mean_steps_to_goal)):
+        mean_steps_to_goal = float(max(0.0, float(mean_steps_to_goal)))
+    else:
+        mean_steps_to_goal = None
+
+    if goal_completion is None:
+        reason_counts = eval_metrics.get("reason_counts")
+        if isinstance(reason_counts, dict):
+            success_reasons = {
+                "goal_reached",
+                "took_correct_goal",
+                "you_got_food",
+                "food_collected",
+                "reached_target",
+            }
+            total = 0
+            success = 0
+            for reason_raw, count_raw in reason_counts.items():
+                if not isinstance(count_raw, (int, float)) or not math.isfinite(float(count_raw)):
+                    continue
+                count = int(max(0, int(float(count_raw))))
+                if count <= 0:
+                    continue
+                total += count
+                reason = str(reason_raw).strip().lower()
+                if reason in success_reasons:
+                    success += count
+            if total > 0:
+                goal_completion = float(success) / float(total)
+
+    if mean_steps_to_goal is None and goal_completion is not None and float(goal_completion) > 0.0:
+        mean_length = eval_metrics.get("mean_length")
+        if isinstance(mean_length, (int, float)) and math.isfinite(float(mean_length)):
+            mean_steps_to_goal = float(max(0.0, float(mean_length)))
+
+    return goal_completion, mean_steps_to_goal
+
+
 def _long_horizon_metrics_from_eval(
     eval_metrics: Optional[Dict[str, Any]],
     *,
@@ -763,6 +824,9 @@ def _long_horizon_score(
     *,
     mean_return: Optional[float],
     horizon_utilization: Optional[float],
+    goal_completion_rate: Optional[float] = None,
+    mean_steps_to_goal: Optional[float] = None,
+    horizon_steps: Optional[int] = None,
     planner_gain: Optional[float],
     timeout_rate: Optional[float],
 ) -> Optional[float]:
@@ -774,6 +838,11 @@ def _long_horizon_score(
         base_comps.append(float(max(0.0, min(1.0, float(horizon_utilization)))))
     if timeout_rate is not None:
         base_comps.append(float(max(0.0, min(1.0, 1.0 - float(timeout_rate)))))
+    if goal_completion_rate is not None:
+        base_comps.append(float(max(0.0, min(1.0, float(goal_completion_rate)))))
+    if mean_steps_to_goal is not None and isinstance(horizon_steps, int) and int(horizon_steps) > 0:
+        eff = 1.0 - (float(mean_steps_to_goal) / float(max(1, int(horizon_steps))))
+        base_comps.append(float(max(0.0, min(1.0, eff))))
     base_score = _geometric_mean(base_comps)
     if base_score is None:
         return None
@@ -889,13 +958,21 @@ def _suite_ci_sample_values(suite_name: str, run_records: List[Dict[str, Any]]) 
                 v = res.get("max_steps_env")
                 if isinstance(v, (int, float)) and math.isfinite(float(v)):
                     horizon_steps = int(float(v))
+            if horizon_steps is None:
+                max_steps = eval_metrics.get("max_steps")
+                if isinstance(max_steps, (int, float)) and math.isfinite(float(max_steps)):
+                    horizon_steps = int(float(max_steps))
             util, timeout_rate, _ = _long_horizon_metrics_from_eval(
                 eval_metrics,
                 horizon_steps=horizon_steps,
             )
+            goal_completion, mean_steps_to_goal = _long_horizon_success_metrics_from_eval(eval_metrics)
             s = _long_horizon_score(
                 mean_return=eval_metrics.get("mean_return"),
                 horizon_utilization=util,
+                goal_completion_rate=goal_completion,
+                mean_steps_to_goal=mean_steps_to_goal,
+                horizon_steps=horizon_steps,
                 planner_gain=None,
                 timeout_rate=timeout_rate,
             )
@@ -998,9 +1075,14 @@ def _build_suite_specs(
                     max_steps_env=120,
                     max_energy_env=160,
                 ),
+                BenchCase(
+                    name="long_horizon_minigrid",
+                    env_type="minigrid",
+                    minigrid_scenarios=minigrid_scenarios,
+                ),
             ],
             implemented=True,
-            description="Long-horizon planning/survival with extended episode length.",
+            description="Long-horizon planning/survival across gridworld and minigrid tasks.",
         ),
         "core": SuiteSpec(
             name="core",
@@ -1694,6 +1776,9 @@ def _run_suite(
         test_returns: List[float] = []
         horizon_vals: List[float] = []
         timeout_vals: List[float] = []
+        goal_completion_vals: List[float] = []
+        goal_steps_vals: List[float] = []
+        horizon_steps_vals: List[int] = []
         planner_gain_vals: List[float] = []
         catastrophic_vals: List[float] = []
         for record in run_records:
@@ -1706,12 +1791,23 @@ def _run_suite(
                 v = res.get("max_steps_env")
                 if isinstance(v, (int, float)) and math.isfinite(float(v)):
                     horizon_steps = int(float(v))
+            if horizon_steps is None:
+                max_steps = eval_metrics.get("max_steps")
+                if isinstance(max_steps, (int, float)) and math.isfinite(float(max_steps)):
+                    horizon_steps = int(float(max_steps))
+            if isinstance(horizon_steps, int) and int(horizon_steps) > 0:
+                horizon_steps_vals.append(int(horizon_steps))
             mean_val = eval_metrics.get("mean_return")
             if isinstance(mean_val, (int, float)) and math.isfinite(float(mean_val)):
                 mean_returns.append(float(mean_val))
             test_val = eval_metrics.get("test_mean_return")
             if isinstance(test_val, (int, float)) and math.isfinite(float(test_val)):
                 test_returns.append(float(test_val))
+            goal_completion, mean_steps_to_goal = _long_horizon_success_metrics_from_eval(eval_metrics)
+            if goal_completion is not None:
+                goal_completion_vals.append(float(goal_completion))
+            if mean_steps_to_goal is not None:
+                goal_steps_vals.append(float(mean_steps_to_goal))
             horizon_util, timeout_rate, catastrophic_rate = _long_horizon_metrics_from_eval(
                 eval_metrics,
                 horizon_steps=horizon_steps,
@@ -1742,6 +1838,11 @@ def _run_suite(
         test_mean_return = _safe_mean(test_returns)
         horizon_utilization = _safe_mean(horizon_vals)
         timeout_rate = _safe_mean(timeout_vals)
+        goal_completion_rate = _safe_mean(goal_completion_vals)
+        mean_steps_to_goal = _safe_mean(goal_steps_vals)
+        horizon_steps_ref: Optional[int] = None
+        if horizon_steps_vals:
+            horizon_steps_ref = int(round(float(np.mean(horizon_steps_vals))))
         planner_gain = _safe_mean(planner_gain_vals)
         catastrophic_rate = _safe_mean(catastrophic_vals)
         metrics.update(
@@ -1750,6 +1851,8 @@ def _run_suite(
                 "test_mean_return": test_mean_return,
                 "horizon_utilization": horizon_utilization,
                 "timeout_rate": timeout_rate,
+                "goal_completion_rate": goal_completion_rate,
+                "mean_steps_to_goal": mean_steps_to_goal,
                 "planner_gain": planner_gain,
                 "catastrophic_fail_rate": catastrophic_rate,
             }
@@ -1757,6 +1860,9 @@ def _run_suite(
         score = _long_horizon_score(
             mean_return=mean_return,
             horizon_utilization=horizon_utilization,
+            goal_completion_rate=goal_completion_rate,
+            mean_steps_to_goal=mean_steps_to_goal,
+            horizon_steps=horizon_steps_ref,
             planner_gain=planner_gain,
             timeout_rate=timeout_rate,
         )

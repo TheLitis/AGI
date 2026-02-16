@@ -92,17 +92,47 @@ def test_long_horizon_score_prefers_better_profiles():
     good = bench._long_horizon_score(
         mean_return=2.0,
         horizon_utilization=0.85,
+        goal_completion_rate=0.75,
+        mean_steps_to_goal=25.0,
+        horizon_steps=120,
         planner_gain=1.0,
         timeout_rate=0.05,
     )
     bad = bench._long_horizon_score(
         mean_return=-2.0,
         horizon_utilization=0.30,
+        goal_completion_rate=0.10,
+        mean_steps_to_goal=110.0,
+        horizon_steps=120,
         planner_gain=-1.0,
         timeout_rate=0.60,
     )
     assert good is not None and bad is not None
     assert 0.0 <= bad < good <= 1.0
+
+
+def test_long_horizon_success_metrics_use_explicit_episode_fields():
+    eval_metrics = {
+        "episode_success_rate": 0.7,
+        "mean_steps_to_success": 18.0,
+        "reason_counts": {"goal_reached": 1, "max_steps": 9},
+    }
+    success, mean_steps = bench._long_horizon_success_metrics_from_eval(eval_metrics)
+    assert success == 0.7
+    assert mean_steps == 18.0
+
+
+def test_long_horizon_success_metrics_fall_back_to_reason_counts():
+    eval_metrics = {
+        "reason_counts": {
+            "goal_reached": 3,
+            "max_steps": 1,
+        },
+        "mean_length": 22.0,
+    }
+    success, mean_steps = bench._long_horizon_success_metrics_from_eval(eval_metrics)
+    assert success == 0.75
+    assert mean_steps == 22.0
 
 
 def test_safety_score_prefers_high_compliance_and_low_catastrophic():
@@ -165,6 +195,7 @@ def test_suite_specs_enable_long_horizon_and_safety_gridworld_cases():
     assert long_suite.cases[0].env_type == "gridworld"
     assert int(long_suite.cases[0].max_steps_env or 0) >= 100
     assert int(long_suite.cases[0].max_energy_env or 0) >= int(long_suite.cases[0].max_steps_env or 0)
+    assert any(c.env_type == "minigrid" for c in long_suite.cases)
     assert safety_suite.cases[0].env_type == "gridworld"
     assert int(safety_suite.cases[0].max_steps_env or 0) >= 100
     assert int(safety_suite.cases[0].max_energy_env or 0) >= int(safety_suite.cases[0].max_steps_env or 0)

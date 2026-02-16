@@ -2682,11 +2682,22 @@ class Trainer:
             return bool(ep_info.get("last_test_passed"))
 
         reason = str(ep_info.get("reason", "")).strip().lower()
-        if reason in {"took_correct_goal", "you_got_food", "food_collected"}:
+        if reason in {
+            "took_correct_goal",
+            "you_got_food",
+            "food_collected",
+            "goal_reached",
+            "reached_target",
+        }:
             return True
-        if reason in {"took_wrong_goal", "other_got_food"}:
+        if reason in {
+            "took_wrong_goal",
+            "other_got_food",
+            "terminated_danger",
+            "pytest_timeout",
+        }:
             return False
-        if reason in {"max_steps", "energy_depleted"}:
+        if reason in {"max_steps", "energy_depleted", "eval_max_steps_cap"}:
             return None
 
         reward_env = ep_info.get("reward_env")
@@ -5811,6 +5822,12 @@ class Trainer:
             social_success_flags: List[bool] = []
             social_success_flags_train: List[bool] = []
             social_success_flags_test: List[bool] = []
+            episode_success_flags: List[bool] = []
+            episode_success_flags_train: List[bool] = []
+            episode_success_flags_test: List[bool] = []
+            success_steps: List[int] = []
+            success_steps_train: List[int] = []
+            success_steps_test: List[int] = []
             planner_alpha_vals: List[float] = []
             planner_js_vals: List[float] = []
             planner_margin_vals: List[float] = []
@@ -6146,6 +6163,17 @@ class Trainer:
                         family = "social-basic"
                 success_flag = self._infer_episode_success_from_info(info)
                 if success_flag is not None:
+                    episode_success_flags.append(bool(success_flag))
+                    if split == "train":
+                        episode_success_flags_train.append(bool(success_flag))
+                    elif split == "test":
+                        episode_success_flags_test.append(bool(success_flag))
+                    if bool(success_flag):
+                        success_steps.append(int(t))
+                        if split == "train":
+                            success_steps_train.append(int(t))
+                        elif split == "test":
+                            success_steps_test.append(int(t))
                     if "instruction" in family:
                         instruction_success_flags.append(bool(success_flag))
                         if split == "train":
@@ -6297,6 +6325,20 @@ class Trainer:
                     metrics["social_train_success_rate"] = float(np.mean(social_success_flags_train))
                 if social_success_flags_test:
                     metrics["social_test_success_rate"] = float(np.mean(social_success_flags_test))
+            success_coverage = float(len(episode_success_flags)) / denom_eps
+            metrics["episode_success_coverage"] = success_coverage
+            if episode_success_flags:
+                metrics["episode_success_rate"] = float(np.mean(episode_success_flags))
+                if episode_success_flags_train:
+                    metrics["episode_train_success_rate"] = float(np.mean(episode_success_flags_train))
+                if episode_success_flags_test:
+                    metrics["episode_test_success_rate"] = float(np.mean(episode_success_flags_test))
+            if success_steps:
+                metrics["mean_steps_to_success"] = float(np.mean(success_steps))
+                if success_steps_train:
+                    metrics["mean_train_steps_to_success"] = float(np.mean(success_steps_train))
+                if success_steps_test:
+                    metrics["mean_test_steps_to_success"] = float(np.mean(success_steps_test))
             return metrics
 
         # Primary eval: respect/enable the environment's action-mask UI (if present).
@@ -6323,6 +6365,13 @@ class Trainer:
                 "social_success_rate",
                 "social_train_success_rate",
                 "social_test_success_rate",
+                "episode_success_coverage",
+                "episode_success_rate",
+                "episode_train_success_rate",
+                "episode_test_success_rate",
+                "mean_steps_to_success",
+                "mean_train_steps_to_success",
+                "mean_test_steps_to_success",
                 "timeout_rate",
                 "damage_episode_rate",
                 "death_rate",
