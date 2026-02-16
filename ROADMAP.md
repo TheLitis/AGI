@@ -1,40 +1,43 @@
 ﻿# ROADMAP (Synced)
 
-Updated: 2026-02-15
+Updated: 2026-02-16
 
 Source of truth: `ROADMAP_v2.md`.
 
 ## Current Stage
-- Primary reference: `reports/agi_v1.quick.seed0.codex_audit.json`.
-- Current gates: `gate0=fail`, `gate1=fail`, `gate2=fail`, `gate3=fail`, `gate4=fail`.
+- Primary reference: `reports/agi_v1.quick.seed01234.rebaseline_phase2.retune1.json`.
+- Current gates: `gate0=pass`, `gate1=pass`, `gate2=pass`, `gate3=pass`, `gate4=pass`.
+- Independent reproducibility rerun: `reports/agi_v1.quick.seed01234.rebaseline_phase2.rerun2.json` (`gate0..gate4=pass`).
 - Internal mountain status (Gate2-Strict, isolated 5-seed):
   - Mountain #2 (`long_horizon`) = `open` (`score = 0.8135`, threshold `>= 0.65`).
-  - Mountain #3 (`lifelong`) = `open` (`forgetting_gap = 0.2031`, `forward_transfer = 1.7203`).
-- Immediate blockers:
-  - `core` suite runtime failure: `OSError: [Errno 22] Invalid argument`.
-  - `language` suite runtime failure: `OSError: [Errno 22] Invalid argument`.
-  - `overall.confidence = 0.6381` (below Gate4 threshold `>= 0.80`).
+  - Mountain #3 (`lifelong`) = `open` (`forgetting_gap = 0.2033`, `forward_transfer = 1.7203`).
+- Canonical baseline health:
+  - `core` suite = `ok`, `language` suite = `ok` (no runtime `OSError: [Errno 22] Invalid argument`).
+  - `overall.confidence = 0.8836` (above Gate4 threshold `>= 0.80`).
 
 ## Active Priority Order
-1. Restore canonical baseline health: fix `core/language` runtime failures (`OSError: [Errno 22] Invalid argument`).
-2. Preserve Mountain #2/#3 gains while revalidating on canonical AGI quick runs.
-3. Safety/alignment hardening (Mountain #7).
-4. Then expansion of remaining mountains.
+1. Keep Gate0-3 stable on repeated 5-seed runs and full/OOD acceptance packs.
+2. Safety/alignment hardening (Mountain #7), especially catastrophic-failure reduction.
+3. Preserve Mountain #2/#3 quality while extending Mountain #1/#4/#6 depth.
+4. Maintain infra reliability guardrails (including Windows-safe run logging).
 
 ## Confirmed Metrics Snapshot
+- overall:
+  - `agi_score = 0.7980`
+  - `overall.confidence = 0.8836`
 - capabilities:
-  - `generalization_score = 0.9701`
-  - `sample_efficiency_score = 1.0000`
-  - `robustness_score = 0.9266`
-  - `tool_workflow_score = 0.9167`
-- required suite status on validated baseline:
-  - `long_horizon = ok`, `score = 0.7063`
-  - `tools = ok`, `score = 0.8333`
-  - `social = ok`, `score = 1.0000`
-  - `lifelong = ok`, `score = 0.5866`
-  - `safety = ok`, `score = 0.8178`
-  - `core = error` (`OSError: [Errno 22] Invalid argument`)
-  - `language = error` (`OSError: [Errno 22] Invalid argument`)
+  - `generalization_score = 0.8484`
+  - `sample_efficiency_score = 0.8548`
+  - `robustness_score = 0.9327`
+  - `tool_workflow_score = 0.9583`
+- required suite status on canonical validated baseline:
+  - `long_horizon = ok`, `score = 0.8135`, `ci.half_width = 0.0144`
+  - `tools = ok`, `score = 0.9167`, `ci.half_width = 0.0517`
+  - `social = ok`, `score = 0.8500`, `ci.half_width = 0.0995`
+  - `lifelong = ok`, `score = 0.5852`, `ci.half_width = 0.0648`
+  - `safety = ok`, `score = 0.7830`, `ci.half_width = 0.0623`
+  - `core = ok`, `score = 1.0000`, `ci.half_width = 0.0202`
+  - `language = ok`, `score = 0.7095`, `ci.half_width = 0.0135`
 
 ## What Is Already Implemented
 - Report schema `0.2` in `bench.py` with:
@@ -60,11 +63,11 @@ Source of truth: `ROADMAP_v2.md`.
   - `run_lifelong_eval` now records uncertainty consistently with train path
 
 ## Immediate Next Milestones
-1. Fix runtime failures in `core` and `language` suites (`OSError: [Errno 22] Invalid argument`) and restore `gate0=pass`.
-2. Regenerate a validated multi-seed AGI quick baseline (`seeds 0..4`) including all required suites.
-3. Reconfirm Gate2/Gate3 on canonical baseline after runtime fix, then continue confidence push (`overall.confidence >= 0.80`).
+1. Run full 5-seed AGI acceptance (`quick/full/OOD`) and keep gate consistency.
+2. Reduce catastrophic safety failures and improve constraint compliance under harder distributions.
+3. Expand 8-mountain depth (multimodality, stronger ToM/social transfer, language abstraction quality) without regressing Gate0-3.
 
-## Priority Smoke (2026-02-15)
+## Historical Priority Smoke (2026-02-15)
 - Reference artifact: `reports/bench_priority_quick_seed0.autonomy2.json`
 - `long_horizon.score = 0.7063`
 - `lifelong.score = 0.6612`

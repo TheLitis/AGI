@@ -1,39 +1,47 @@
 ﻿# ROADMAP v2: Gate-Driven AGI-Ready Program
 
-Updated: 2026-02-15
+Updated: 2026-02-16
 
 ## 1. Goal
 - Maintain a reproducible AGI-ready research contour with measurable criteria across all 8 technical mountains.
 - Keep proof-by-evaluation as the governing rule: stable gates, multi-seed robustness, OOD checks, and capability metrics.
 
 ## 2. Current Snapshot (Fact)
-- Primary reference report: `reports/agi_v1.quick.seed0.codex_audit.json`.
+- Primary reference report: `reports/agi_v1.quick.seed01234.rebaseline_phase2.retune1.json`.
 - Current gates:
-  - `gate0=fail`
-  - `gate1=fail`
-  - `gate2=fail`
-  - `gate3=fail`
-  - `gate4=fail`
-- Current blockers:
-  - `core` suite runtime error: `OSError: [Errno 22] Invalid argument`
-  - `language` suite runtime error: `OSError: [Errno 22] Invalid argument`
-  - `overall.confidence = 0.6381` (< `0.80`)
-- Capability vector (already above thresholds):
-  - `generalization_score = 0.9701`
-  - `sample_efficiency_score = 1.0000`
-  - `robustness_score = 0.9266`
-  - `tool_workflow_score = 0.9167`
-- Priority-suite seed0 smoke after infrastructure/tuning:
+  - `gate0=pass`
+  - `gate1=pass`
+  - `gate2=pass`
+  - `gate3=pass`
+  - `gate4=pass`
+- Independent rerun #2 (same config): `reports/agi_v1.quick.seed01234.rebaseline_phase2.rerun2.json` (`gate0..gate4=pass`).
+- Canonical baseline health:
+  - `core` and `language` are `status=ok` (no active `OSError: [Errno 22] Invalid argument`).
+  - `overall.confidence = 0.8836` (>= `0.80`).
+- Capability vector:
+  - `generalization_score = 0.8484`
+  - `sample_efficiency_score = 0.8548`
+  - `robustness_score = 0.9327`
+  - `tool_workflow_score = 0.9583`
+- Canonical 5-seed suite snapshot:
+  - `long_horizon.score = 0.8135` (`ci.half_width = 0.0144`)
+  - `lifelong.score = 0.5852` (`forgetting_gap = 0.2033`, `forward_transfer = 1.7203`, `ci.half_width = 0.0648`)
+  - `safety.score = 0.7830` (`ci.half_width = 0.0623`)
+  - `tools.score = 0.9167` (`ci.half_width = 0.0517`)
+  - `core.score = 1.0000` (`ci.half_width = 0.0202`)
+  - `language.score = 0.7095` (`ci.half_width = 0.0135`)
+  - `social.score = 0.8500` (`ci.half_width = 0.0995`)
+- Historical priority-suite seed0 smoke after infrastructure/tuning:
   - artifact: `reports/bench_priority_quick_seed0.autonomy2.json`
   - `long_horizon.score = 0.7063`
   - `lifelong.score = 0.6612`
   - `safety.score = 0.8178`
-- Priority-suite 2-seed sanity:
+- Historical priority-suite 2-seed sanity:
   - artifact: `reports/bench_priority_quick_seed01.autonomy1.json`
   - `long_horizon.score = 0.7264`
   - `lifelong.score = 0.5718`
   - `safety.score = 0.7703`
-- Priority-suite 5-seed quick snapshots (isolated):
+- Historical priority-suite 5-seed quick snapshots (isolated):
   - `reports/bench_long_horizon_quick_seed01234.phase1_m23.json`
     - `long_horizon.score = 0.8135`
     - `long_horizon.ci.half_width = 0.0144`
@@ -49,19 +57,18 @@ Updated: 2026-02-15
 - Internal Gate2-Strict mountain opener:
   - `python scripts/check_mountains_open.py --long-horizon-report reports/bench_long_horizon_quick_seed01234.phase1_m23.json --lifelong-report reports/bench_lifelong_quick_seed01234.phase1_m23.json`
   - result: `[OPEN]` (Mountain #2/#3 opened on isolated suites)
-- Note:
-  - priority-suite snapshots above are directional diagnostics and not the canonical validated AGI reference; canonical AGI gates stay blocked until `core/language` runtime fix.
 - Infra update completed:
   - dedicated `long_horizon` suite added to AGI-bench runs
   - `trainer.evaluate()` now emits operational safety metrics (`constraint_compliance`, `catastrophic_fail_rate`, `death_rate`, `reason_counts`)
   - `safety` suite now combines planner smoke + runtime safety metrics (no longer placeholder-only)
   - lifelong CI now computed from per-run lifelong score instead of raw transfer deltas
+  - `ExperimentLogger` now sanitizes `run_id` for Windows filename safety
 
 ## 2.1 Active Execution Priority
-1. Recover canonical baseline health by fixing `core/language` runtime failures.
-2. Preserve and re-validate Mountain #2/#3 gains on canonical AGI quick runs.
-3. Mountain #7: safety/alignment hardening (catastrophic failure reduction).
-4. Remaining mountains after 1-3 are stabilized.
+1. Keep Gate0-3 stability under repeated runs and acceptance packs (`quick/full/OOD`).
+2. Mountain #7: safety/alignment hardening (catastrophic failure reduction, stronger compliance).
+3. Expand mountain depth (#1/#4/#6) while preserving Mountain #2/#3 openness.
+4. Maintain low-flake infra and regression guardrails.
 
 ## 3. Gate Model (DoD)
 
@@ -111,19 +118,19 @@ Status: mostly complete, keep regression discipline.
 - Remaining: keep rerun discipline and reduce flakiness in heavy suites.
 
 ### Phase B (Close Gate2)
-Status: not confirmed on the current validated baseline.
-- Mountain #2/#3 Gate2-Strict thresholds are open on isolated 5-seed reports, but the current canonical baseline still has `gate0=fail`.
-- Immediate requirement: fix `core/language` runtime errors, then regenerate validated multi-seed AGI quick baseline.
+Status: confirmed on canonical 5-seed quick baseline.
+- Gate2 pass is established on `reports/agi_v1.quick.seed01234.rebaseline_phase2.retune1.json`.
+- Maintain regression checks to keep suite thresholds stable after new tuning cycles.
 
 ### Phase C (Close Gate3)
-Status: not confirmed on the current validated baseline.
-- Gate3 cannot be claimed while `gate0/gate2` are failing on the canonical validated baseline.
-- Remaining requirement: re-establish Gate2 first, then re-check CI thresholds on validated multi-seed runs.
+Status: confirmed on canonical 5-seed quick baseline + independent rerun #2.
+- Gate3 CI thresholds pass on both `retune1` and `rerun2` artifacts.
+- Keep variance controls and CI sampling discipline under future changes.
 
 ### Phase D (8-mountain completeness)
 Status: in progress.
 - Long-horizon and safety base suites are now wired into bench; Mountain #2/#3 are open in isolated 5-seed checks.
-- Current blockers are metric quality and multi-seed robustness (especially catastrophic safety outcomes, deep ToM, stronger multimodality), not only gate math.
+- Current blockers are depth and breadth beyond gate math: stronger OOD evidence, catastrophic safety reduction, deeper ToM/social transfer, and richer multimodality.
 
 ## 5. 8-Mountain Matrix (metric -> test -> DoD)
 
