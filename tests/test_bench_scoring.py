@@ -61,6 +61,29 @@ def test_lifelong_ci_samples_use_lifelong_score_not_raw_delta():
     assert vals[0] == expected
 
 
+def test_lifelong_diag_ci_samples_use_lifelong_score_not_raw_delta():
+    run_records = [
+        {
+            "status": "ok",
+            "result": {
+                "stage_metrics": {
+                    "lifelong_eval": {
+                        "lifelong_forgetting_R1_gap": -0.5,
+                        "lifelong_adaptation_R2_delta": 1.0,
+                        "lifelong_adaptation_R3_delta": 0.0,
+                    }
+                }
+            },
+            "eval": {},
+        }
+    ]
+    vals = bench._suite_ci_sample_values("lifelong_diag", run_records)
+    expected = bench._lifelong_score(forgetting_gap=-0.5, forward_transfer=0.6)
+    assert expected is not None
+    assert len(vals) == 1
+    assert vals[0] == expected
+
+
 def test_core_ci_samples_use_normalized_core_score():
     run_records = [
         {
@@ -199,6 +222,19 @@ def test_suite_specs_enable_long_horizon_and_safety_gridworld_cases():
     assert safety_suite.cases[0].env_type == "gridworld"
     assert int(safety_suite.cases[0].max_steps_env or 0) >= 100
     assert int(safety_suite.cases[0].max_energy_env or 0) >= int(safety_suite.cases[0].max_steps_env or 0)
+
+
+def test_suite_specs_include_lifelong_diag_cross_env_cases():
+    specs = bench._build_suite_specs(
+        minigrid_override=None,
+        computer_override=None,
+        repo_override=None,
+        ood=False,
+    )
+    suite = specs["lifelong_diag"]
+    assert suite.implemented is True
+    assert any(c.env_type == "gridworld" for c in suite.cases)
+    assert any(c.env_type == "minigrid" for c in suite.cases)
 
 
 def test_language_rates_prefer_explicit_success_metrics():

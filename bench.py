@@ -491,6 +491,10 @@ SUITE_METRICS_KEYS: Dict[str, List[str]] = {
         "forgetting_gap",
         "forward_transfer",
     ],
+    "lifelong_diag": [
+        "forgetting_gap",
+        "forward_transfer",
+    ],
     "safety": [
         "safety_planner_ok",
         "constraint_compliance",
@@ -989,7 +993,7 @@ def _suite_ci_sample_values(suite_name: str, run_records: List[Dict[str, Any]]) 
             if success_rate is not None:
                 values.append(float(success_rate))
             continue
-        if suite_name == "lifelong":
+        if suite_name in {"lifelong", "lifelong_diag"}:
             res = record.get("result") or {}
             if not isinstance(res, dict):
                 continue
@@ -1134,6 +1138,19 @@ def _build_suite_specs(
             implemented=True,
             description="Continual adaptation/forgetting suite.",
         ),
+        "lifelong_diag": SuiteSpec(
+            name="lifelong_diag",
+            cases=[
+                BenchCase(name="lifelong_diag_gridworld", env_type="gridworld", max_energy_env=80),
+                BenchCase(
+                    name="lifelong_diag_minigrid",
+                    env_type="minigrid",
+                    minigrid_scenarios=minigrid_scenarios,
+                ),
+            ],
+            implemented=True,
+            description="Cross-domain lifelong diagnostic suite (gridworld + minigrid).",
+        ),
         "safety": SuiteSpec(
             name="safety",
             cases=[
@@ -1157,7 +1174,19 @@ def parse_args() -> argparse.Namespace:
         "--suite",
         type=str,
         default="agi_v1",
-        choices=["long_horizon", "core", "tools", "tools_open", "language", "social", "lifelong", "safety", "agi_v1", "quick"],
+        choices=[
+            "long_horizon",
+            "core",
+            "tools",
+            "tools_open",
+            "language",
+            "social",
+            "lifelong",
+            "lifelong_diag",
+            "safety",
+            "agi_v1",
+            "quick",
+        ],
         help="Suite name to run.",
     )
     parser.add_argument(
@@ -1333,7 +1362,7 @@ def _run_suite(
             if suite.name == "tools_open":
                 # Open-action tasks need a bit more policy refinement.
                 stage4_updates = 7
-        elif suite.name == "lifelong":
+        elif suite.name in {"lifelong", "lifelong_diag"}:
             # Lifelong metrics are unstable under ultra-short adaptation windows.
             eval_episodes = 8
             n_steps = 256
@@ -1451,6 +1480,7 @@ def _run_suite(
                             "language",
                             "social",
                             "lifelong",
+                            "lifelong_diag",
                             "long_horizon",
                             "core",
                             "safety",
@@ -1500,7 +1530,7 @@ def _run_suite(
                             repo_bc_episodes = 112 if quick else 160
                             repo_online_bc_coef = 0.60
                             run_planning_coef = 0.0
-                    if suite.name == "lifelong":
+                    if suite.name in {"lifelong", "lifelong_diag"}:
                         run_mode = "lifelong"
                         run_lifecycle = True
                         run_regime_aware_replay = True
@@ -1933,7 +1963,7 @@ def _run_suite(
             }
         )
         score = _social_score(success_rate, transfer_rate)
-    elif suite.name == "lifelong":
+    elif suite.name in {"lifelong", "lifelong_diag"}:
         forgetting_vals: List[float] = []
         transfer_vals: List[float] = []
         for record in run_records:
