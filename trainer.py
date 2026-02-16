@@ -208,7 +208,8 @@ class RegimeStats(TypedDict):
     avg_survival: float
     avg_food: float
     avg_damage: float
-    forgetting_gap: float  # baseline_return - current_return
+    retain_delta: float    # current_return - baseline_return (negative = forgetting)
+    forgetting_gap: float  # baseline_return - current_return (legacy alias; positive = forgetting)
     uncertainty: float     # mean SelfModel uncertainty for this regime
     avg_safety_utility: float  # utility of the safety faction
     danger_score: float        # aggregate measure of regime danger
@@ -2726,7 +2727,8 @@ class Trainer:
         avg_food = float(np.mean(food_counts)) if food_counts else 0.0
         avg_damage = float(np.mean(damage_counts)) if damage_counts else 0.0
         avg_uncertainty = float(np.mean(uncertainty_vals)) if uncertainty_vals else 0.0
-        forgetting_gap = float(baseline_return - avg_return)
+        retain_delta = float(avg_return - baseline_return)
+        forgetting_gap = float(-retain_delta)
         moves = move_counts if move_counts is not None else [0 for _ in range(episodes)]
         safety_utils: List[float] = []
         try:
@@ -2751,6 +2753,7 @@ class Trainer:
             "avg_survival": avg_survival,
             "avg_food": avg_food,
             "avg_damage": avg_damage,
+            "retain_delta": retain_delta,
             "forgetting_gap": forgetting_gap,
             "uncertainty": avg_uncertainty,
             "avg_safety_utility": avg_safety_utility,
@@ -2931,10 +2934,7 @@ class Trainer:
         for regime_name, stats in self.regime_stats.items():
             if not isinstance(stats, dict):
                 continue
-            try:
-                forgetting_gap = float(stats.get("forgetting_gap", 0.0))
-            except Exception:
-                forgetting_gap = 0.0
+            forgetting_gap = self._regime_forgetting_loss(stats)
             try:
                 uncertainty = float(stats.get("uncertainty", 0.0))
             except Exception:
@@ -2943,6 +2943,39 @@ class Trainer:
             if math.isfinite(w) and w > 0.0:
                 weights[str(regime_name)] = w
         return weights
+
+    @staticmethod
+    def _regime_forgetting_loss(stats: Dict[str, Any]) -> float:
+        """
+        Standardized forgetting magnitude used by curriculum/replay weighting.
+
+        Primary convention: retain_delta = current - baseline (negative means forgetting).
+        Legacy fallback: forgetting_gap = baseline - current (positive means forgetting).
+        """
+        if isinstance(stats, dict):
+            retain_delta = stats.get("retain_delta")
+            if isinstance(retain_delta, (int, float)) and math.isfinite(float(retain_delta)):
+                return float(max(0.0, -float(retain_delta)))
+            forgetting_gap = stats.get("forgetting_gap")
+            if isinstance(forgetting_gap, (int, float)) and math.isfinite(float(forgetting_gap)):
+                return float(max(0.0, float(forgetting_gap)))
+        return 0.0
+
+    @staticmethod
+    def _regime_baseline_return(stats: Dict[str, Any], default: float) -> float:
+        if not isinstance(stats, dict):
+            return float(default)
+        avg = stats.get("avg_return")
+        if not isinstance(avg, (int, float)) or not math.isfinite(float(avg)):
+            return float(default)
+        avg_val = float(avg)
+        retain_delta = stats.get("retain_delta")
+        if isinstance(retain_delta, (int, float)) and math.isfinite(float(retain_delta)):
+            return float(avg_val - float(retain_delta))
+        forgetting_gap = stats.get("forgetting_gap")
+        if isinstance(forgetting_gap, (int, float)) and math.isfinite(float(forgetting_gap)):
+            return float(avg_val + float(forgetting_gap))
+        return float(default)
 
     # =========================
     #  Stage 1: random experience
@@ -8177,9 +8210,7 @@ class Trainer:
                 traits_main=current_traits,
             )
             prev_stats = self.regime_stats.get(regime.name)
-            baseline_val = mean_ret if prev_stats is None else float(
-                prev_stats["avg_return"] + prev_stats["forgetting_gap"]
-            )
+            baseline_val = self._regime_baseline_return(prev_stats, default=mean_ret)
             baseline_regime_perf.setdefault(regime.name, mean_ret)
             self._record_regime_stats(
                 regime_name=regime.name,

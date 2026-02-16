@@ -41,16 +41,42 @@ class RegimeGenerator:
         self._used_descriptor_ids: Set[int] = set()
         self.probabilities: Dict[str, float] = {}
 
+    @staticmethod
+    def _forgetting_loss(stats: "RegimeStats") -> float:
+        """
+        Canonical forgetting magnitude:
+        - retain_delta (current - baseline), negative means forgetting.
+        - legacy fallback forgetting_gap (baseline - current), positive means forgetting.
+        """
+        if not isinstance(stats, dict):
+            return 0.0
+        retain_delta = stats.get("retain_delta")
+        if isinstance(retain_delta, (int, float)):
+            try:
+                if math.isfinite(float(retain_delta)):
+                    return float(max(0.0, -float(retain_delta)))
+            except Exception:
+                pass
+        forgetting_gap = stats.get("forgetting_gap")
+        if isinstance(forgetting_gap, (int, float)):
+            try:
+                if math.isfinite(float(forgetting_gap)):
+                    return float(max(0.0, float(forgetting_gap)))
+            except Exception:
+                pass
+        return 0.0
+
     def _score_existing(self, stats: "RegimeStats") -> float:
         c = self.config
         priority = 0.0
-        if stats["avg_return"] > c.target_avg_return_high and abs(stats["forgetting_gap"]) < c.easy_gap_tolerance:
+        forgetting_loss = self._forgetting_loss(stats)
+        if stats["avg_return"] > c.target_avg_return_high and forgetting_loss < c.easy_gap_tolerance:
             priority -= 1.0  # too easy, de-prioritize
         if stats["avg_return"] < c.target_avg_return_low:
             priority -= 0.5
-        priority += c.forgetting_weight * max(stats["forgetting_gap"], 0.0)
+        priority += c.forgetting_weight * forgetting_loss
         priority += c.uncertainty_weight * max(stats["uncertainty"], 0.0)
-        if c.target_avg_return_low <= stats["avg_return"] <= c.target_avg_return_high and stats["forgetting_gap"] > 0:
+        if c.target_avg_return_low <= stats["avg_return"] <= c.target_avg_return_high and forgetting_loss > 0:
             priority += 0.5  # golden middle with forgetting -> boost
         return priority
 
@@ -121,7 +147,7 @@ class RegimeGenerator:
                     self.config, "max_dangerous_regime_fraction", 1.0
                 ):
                     priority = min(priority, base_priority, 0.0)
-                gap_k = float(stats.get("forgetting_gap", 0.0))
+                gap_k = float(self._forgetting_loss(stats))
                 avg_ret = float(stats.get("avg_return", 0.0))
                 target_ret = getattr(self.config, "target_return_for_curriculum", 0.7)
                 alpha_f = getattr(self.config, "alpha_forgetting", 0.02)

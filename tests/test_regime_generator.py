@@ -11,8 +11,11 @@ def _stats(
     avg_return: float,
     forgetting_gap: float,
     uncertainty: float,
+    retain_delta: float = None,
     episodes_seen: int = 10,
 ):
+    if retain_delta is None:
+        retain_delta = -float(forgetting_gap)
     return {
         "regime_name": "dummy",
         "episodes_seen": episodes_seen,
@@ -20,6 +23,7 @@ def _stats(
         "avg_survival": 0.5,
         "avg_food": 0.3,
         "avg_damage": 0.1,
+        "retain_delta": retain_delta,
         "forgetting_gap": forgetting_gap,
         "uncertainty": uncertainty,
     }
@@ -63,3 +67,21 @@ def test_proposes_new_regime_when_capacity_allows():
     }
     proposals = gen.propose_regimes(current, {})
     assert any(p.name.startswith("regime_new") for p in proposals)
+
+
+def test_retain_delta_negative_is_treated_as_forgetting():
+    cfg = RegimeGeneratorConfig()
+    gen = RegimeGenerator(cfg, all_env_descriptors=[{"id": 0}, {"id": 1}])
+    current = {
+        "stable": RegimeConfig("stable", {"balanced": 1.0}),
+        "forgetting": RegimeConfig("forgetting", {"balanced": 1.0}),
+    }
+    stats = {
+        "stable": _stats(avg_return=0.7, forgetting_gap=0.0, retain_delta=0.0, uncertainty=0.1),
+        # Legacy forgetting_gap is intentionally non-positive here to validate
+        # that retain_delta (primary convention) drives prioritization.
+        "forgetting": _stats(avg_return=0.7, forgetting_gap=-0.2, retain_delta=-0.3, uncertainty=0.1),
+    }
+    proposals = gen.propose_regimes(current, stats)
+    priorities = {p.name: p.priority for p in proposals if p.name in current}
+    assert priorities["forgetting"] > priorities["stable"]
