@@ -1,0 +1,65 @@
+{
+  "schema_version": "0.2",
+  "sprint": "planning_diag_phase_sprint",
+  "goal": "improve planner reality metrics via planner_world_reward_blend and safety penalty knobs",
+  "seed0_grid_summary_report": "reports/planning_diag_tune_seed0_summary.phase_sprint.json",
+  "baseline_5seed": {
+    "report": "reports\\bench_planning_diag_quick_seed01234.baseline_b0p7_c1p0_t0p0.phase_sprint.json",
+    "config_hash": "9271f4c3fa24856e",
+    "score": 0.701549192352262,
+    "metrics": {
+      "planner_reality_steps": 390.4,
+      "planner_score_corr_advantage": -0.006828994712286697,
+      "planner_top1_advantage_nstep": -0.08994646072387695,
+      "planner_regret_proxy_nstep": 0.018599462509155274,
+      "catastrophic_fail_rate": 0.1,
+      "success_rate": 0.9,
+      "efficiency_score": 0.9
+    }
+  },
+  "candidate_5seed_corr": {
+    "report": "reports\\bench_planning_diag_quick_seed01234.candidate_corr_b1p0_c1p0_t0p0.phase_sprint.json",
+    "config_hash": "32543980353b9ccb",
+    "score": 0.7009251686354331,
+    "metrics": {
+      "planner_reality_steps": 393.2,
+      "planner_score_corr_advantage": 0.00670555485810521,
+      "planner_top1_advantage_nstep": -0.0301912784576416,
+      "planner_regret_proxy_nstep": 0.05044856071472168,
+      "catastrophic_fail_rate": 0.1,
+      "success_rate": 0.9,
+      "efficiency_score": 0.9
+    }
+  },
+  "candidate_5seed_top1": {
+    "report": "reports\\bench_planning_diag_quick_seed01234.candidate_top1_b0p5_c1p0_t0p0.phase_sprint.json",
+    "config_hash": "fbcae7fba7f81694",
+    "score": 0.7063396810994842,
+    "metrics": {
+      "planner_reality_steps": 392.1,
+      "planner_score_corr_advantage": 0.012518457245494042,
+      "planner_top1_advantage_nstep": -0.033542823791503903,
+      "planner_regret_proxy_nstep": 0.05100679397583008,
+      "catastrophic_fail_rate": 0.08,
+      "success_rate": 0.9199999999999999,
+      "efficiency_score": 0.9199999999999999
+    }
+  },
+  "selected_best_report": "reports\\bench_planning_diag_quick_seed01234.phase_sprint_best.json",
+  "selected_best_reason": "best combined improvement in corr-adv and top1-adv vs baseline with lower catastrophic_fail_rate",
+  "check_planner_reality": {
+    "default_thresholds": {
+      "min_steps": 200,
+      "min_corr_adv": 0.0,
+      "min_top1_adv": 0.0,
+      "selected_best_open": false,
+      "blocker": "planner_top1_advantage_nstep < 0"
+    },
+    "relaxed_thresholds": {
+      "min_steps": 200,
+      "min_corr_adv": 0.0,
+      "min_top1_adv": -0.04,
+      "selected_best_open": true
+    }
+  }
+}

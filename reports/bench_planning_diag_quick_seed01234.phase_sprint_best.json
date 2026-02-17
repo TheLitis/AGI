@@ -1,0 +1,256 @@
+{
+  "schema_version": "0.2",
+  "meta": {
+    "timestamp": 1771355542,
+    "git_commit": "ebe5bfeb20bf7869086a9bbfbff8c8c1b5405984",
+    "seed_list": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "suite": "planning_diag",
+    "ood": false,
+    "quick": true,
+    "config": {
+      "mode": "stage4",
+      "variants": [
+        "full"
+      ],
+      "use_skills": false,
+      "skill_mode": "handcrafted",
+      "n_latent_skills": 0,
+      "masked_only": false,
+      "unmasked_only": false,
+      "eval_max_steps": 200,
+      "planner_world_reward_blend": 0.5,
+      "safety_penalty_coef": 1.0,
+      "safety_threshold": 0.0,
+      "force_cpu": false,
+      "auto_force_cpu_repo": false,
+      "eval_episodes": 5,
+      "lifecycle_eval_episodes": 2,
+      "lifecycle_online_episodes": 2,
+      "self_model_batches": 20,
+      "self_reflection_batches": 5,
+      "stage3c_batches": 5,
+      "stage3c_collect_episodes": 2,
+      "n_steps": 128,
+      "stage2_updates": 1,
+      "stage4_updates": 1,
+      "eval_policy": "greedy",
+      "run_self_reflection": false,
+      "run_stage3c": false,
+      "run_lifecycle": false
+    },
+    "config_hash": "fbcae7fba7f81694",
+    "run_manifest": {
+      "config_hash": "fbcae7fba7f81694",
+      "seed_list": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "seed_count": 5,
+      "git_commit": "ebe5bfeb20bf7869086a9bbfbff8c8c1b5405984",
+      "suite": "planning_diag",
+      "ood": false,
+      "quick": true,
+      "environment": {
+        "platform": "win32",
+        "python_version": "3.12.10",
+        "executable": "C:\\Users\\loval\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "machine": "AMD64",
+        "processor": "Intel64 Family 6 Model 165 Stepping 5, GenuineIntel",
+        "torch_version": "2.10.0+cpu",
+        "cuda_available": false
+      }
+    }
+  },
+  "overall": {
+    "agi_score": 0.7063396810994842,
+    "notes": [],
+    "gates": {
+      "gate0": "pass",
+      "gate1": "na",
+      "gate2": "na",
+      "gate3": "na",
+      "gate4": "na"
+    },
+    "capabilities": {
+      "generalization_score": null,
+      "sample_efficiency_score": null,
+      "robustness_score": null,
+      "tool_workflow_score": null
+    },
+    "confidence": null
+  },
+  "suites": [
+    {
+      "name": "planning_diag",
+      "status": "ok",
+      "score": 0.7063396810994842,
+      "ci": {
+        "n": 10,
+        "mean": 0.46356357039948765,
+        "std": 0.4911989356573858,
+        "se": 0.15533074209278364,
+        "half_width": 0.3044482545018559,
+        "lower": 0.15911531589763173,
+        "upper": 0.7680118249013436
+      },
+      "metrics": {
+        "mean_return": 57.6604319703579,
+        "test_mean_return": 54.577278226614,
+        "horizon_utilization": 0.5428229166666666,
+        "success_rate": 0.9199999999999999,
+        "efficiency_score": 0.9199999999999999,
+        "timeout_rate": 0.5,
+        "goal_completion_rate": 0.9199999999999999,
+        "mean_steps_to_goal": null,
+        "planner_gain": 9.688930857181548,
+        "planner_reality_steps": 392.1,
+        "planner_score_nstep_corr": -0.01593414963847329,
+        "policy_score_nstep_corr": -0.028452606883967328,
+        "planner_score_corr_advantage": 0.012518457245494042,
+        "planner_top1_match_rate": 0.48596394509077073,
+        "policy_top1_match_rate": 0.5594222605228424,
+        "planner_top1_advantage_nstep": -0.033542823791503903,
+        "planner_regret_proxy_nstep": 0.05100679397583008,
+        "catastrophic_fail_rate": 0.08
+      },
+      "per_env": [
+        {
+          "env": "gridworld/h120",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "gridworld/h120",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 5,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 5,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 5,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 5,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "timeout_episodes": 5,
+          "capped_all_eval_episodes": true
+        }
+      ],
+      "notes": [
+        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=0",
+        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=1",
+        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=2",
+        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=3",
+        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=4"
+      ]
+    }
+  ]
+}
