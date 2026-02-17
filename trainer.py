@@ -448,6 +448,9 @@ class Trainer:
         self.planner_gamma = planner_gamma
         self.planner_mode = planner_mode
         self.planner_rollouts = planner_rollouts
+        # Blend imagined reward from world-model event heads with self-model utility.
+        # 1.0 = world-only, 0.0 = self-only.
+        self.planner_world_reward_blend = 0.70
 
         # Pipeline overview:
         #   Stage 1: collect_random_experience + train_world_model
@@ -3058,10 +3061,14 @@ class Trainer:
                 r_seq,
                 d_seq,
                 death_seq,
+                food_seq,
+                dmg_seq,
+                move_seq,
+                alive_seq,
                 scenario_seq,
                 env_seq,
             ) = self._sample_sequences_from_buffer(
-                self.buffer, batch_size, seq_len, with_events=False, current_regime=self.current_regime_name
+                self.buffer, batch_size, seq_len, with_events=True, current_regime=self.current_regime_name
             )
 
             patch = torch.from_numpy(obs_seq).long().to(self.device)
@@ -3083,7 +3090,24 @@ class Trainer:
             )
             z_seq = z_flat.reshape(B, T, -1)
 
-            loss = self.agent.world_model.loss_supervised(z_seq, H, a)
+            reward_t = torch.from_numpy(r_seq).float().to(self.device)[:, :-1]
+            food_t = torch.from_numpy(food_seq).float().to(self.device)[:, :-1]
+            dmg_t = torch.from_numpy(dmg_seq).float().to(self.device)[:, :-1]
+            move_t = torch.from_numpy(move_seq).float().to(self.device)[:, :-1]
+            alive_t = torch.from_numpy(alive_seq).float().to(self.device)[:, :-1]
+            event_targets = {
+                "reward": reward_t,
+                "food": food_t,
+                "damage": dmg_t,
+                "move": move_t,
+                "alive": alive_t,
+            }
+            loss = self.agent.world_model.loss_supervised(
+                z_seq,
+                H,
+                a,
+                event_targets=event_targets,
+            )
 
             self.agent.optim_world.zero_grad()
             loss.backward()
@@ -3242,7 +3266,135 @@ class Trainer:
         next_prev_reward = reward_main.view(-1, 1).detach()
         return reward_main, reward_safety, h_s_next, next_prev_reward
 
-    def compute_planner_logits(
+    def _planner_step_rewards_from_world(
+        self,
+        *,
+        W_t: torch.Tensor,
+        traits_main: torch.Tensor,
+        traits_safety: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Reward/event estimates from world-model latent dynamics.
+        Returns:
+          reward_main: (B,)
+          reward_safety: (B,)
+          uncertainty: (B,)  -- higher means lower event confidence
+        """
+        batch = int(W_t.shape[0])
+        device = W_t.device
+        dtype = W_t.dtype
+
+        traits_main_rep = traits_main.to(device=device, dtype=dtype)
+        if traits_main_rep.dim() == 1:
+            traits_main_rep = traits_main_rep.view(1, -1)
+        if traits_main_rep.shape[0] == 1 and batch > 1:
+            traits_main_rep = traits_main_rep.expand(batch, -1)
+        elif traits_main_rep.shape[0] != batch:
+            traits_main_rep = traits_main_rep[:1].expand(batch, -1)
+
+        traits_safety_rep = traits_safety.to(device=device, dtype=dtype)
+        if traits_safety_rep.dim() == 1:
+            traits_safety_rep = traits_safety_rep.view(1, -1)
+        if traits_safety_rep.shape[0] == 1 and batch > 1:
+            traits_safety_rep = traits_safety_rep.expand(batch, -1)
+        elif traits_safety_rep.shape[0] != batch:
+            traits_safety_rep = traits_safety_rep[:1].expand(batch, -1)
+
+        preds = self.agent.world_model.predict_event_components(W_t)
+        alive = preds["alive"]
+        food = preds["food"]
+        damage = preds["damage"]
+        move = preds["move"]
+        reward_env = preds["reward_env"]
+
+        w_main = traits_to_preference_weights(traits_main_rep)
+        w_safety = traits_to_preference_weights(traits_safety_rep)
+
+        utility_main = (
+            w_main[:, 0:1] * alive
+            + w_main[:, 1:2] * food
+            + w_main[:, 2:3] * damage
+            + w_main[:, 3:4] * move
+        )
+        utility_safety = (
+            w_safety[:, 0:1] * alive
+            + w_safety[:, 1:2] * food
+            + w_safety[:, 2:3] * damage
+            + w_safety[:, 3:4] * move
+        )
+        reward_main = (utility_main + 0.25 * reward_env).view(-1)
+        reward_safety = (utility_safety + 0.25 * reward_env).view(-1)
+
+        conf_alive = alive * (1.0 - alive)
+        conf_food = food * (1.0 - food)
+        conf_damage = damage * (1.0 - damage)
+        conf_move = move * (1.0 - move)
+        uncertainty = (conf_alive + conf_food + conf_damage + conf_move).view(-1) / 4.0
+        return reward_main, reward_safety, uncertainty
+
+    def _planner_step_rewards(
+        self,
+        *,
+        W_t: torch.Tensor,
+        H_t: torch.Tensor,
+        action_t: torch.Tensor,
+        h_s_prev: torch.Tensor,
+        prev_reward: torch.Tensor,
+        traits_main: torch.Tensor,
+        traits_safety: torch.Tensor,
+        M: torch.Tensor,
+        env_desc: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Combined planner reward estimate:
+          world-model event heads + self-model utility rollout.
+        """
+        rw_world_main, rw_world_safety, rw_world_unc = self._planner_step_rewards_from_world(
+            W_t=W_t,
+            traits_main=traits_main,
+            traits_safety=traits_safety,
+        )
+        rw_self_main, rw_self_safety, h_s_next, next_prev_reward = self._planner_step_rewards_from_self(
+            W_t=W_t,
+            H_t=H_t,
+            action_t=action_t,
+            h_s_prev=h_s_prev,
+            prev_reward=prev_reward,
+            traits_main=traits_main,
+            traits_safety=traits_safety,
+            M=M,
+            env_desc=env_desc,
+        )
+        blend = float(max(0.0, min(1.0, getattr(self, "planner_world_reward_blend", 0.0))))
+        reward_main = blend * rw_world_main + (1.0 - blend) * rw_self_main
+        reward_safety = blend * rw_world_safety + (1.0 - blend) * rw_self_safety
+        return reward_main, reward_safety, rw_world_unc, h_s_next, next_prev_reward
+
+    @staticmethod
+    def _planner_logits_from_q(
+        q_main: torch.Tensor,
+        q_safety: Optional[torch.Tensor] = None,
+        *,
+        safety_threshold: float = 0.0,
+        safety_penalty_coef: float = 1.0,
+    ) -> torch.Tensor:
+        """
+        Convert planner Q-estimates to normalized logits.
+        """
+        q_main = q_main.view(-1)
+        if q_safety is None:
+            penalized = q_main
+        else:
+            q_safety = q_safety.view(-1)
+            risk = torch.relu(torch.as_tensor(float(safety_threshold), device=q_main.device, dtype=q_main.dtype) - q_safety)
+            penalized = q_main - torch.as_tensor(float(safety_penalty_coef), device=q_main.device, dtype=q_main.dtype) * risk
+        penalized = penalized - penalized.mean()
+        std = penalized.std()
+        if bool(torch.isfinite(std).item()) and float(std.item()) > 1.0e-6:
+            penalized = penalized / std
+        return penalized.unsqueeze(0)
+
+    def _planner_estimate_repeat(
         self,
         z_obs: torch.Tensor,      # (1, obs_dim)
         H_t: torch.Tensor,        # (1, h_dim)
@@ -3251,7 +3403,7 @@ class Trainer:
         M: torch.Tensor,          # (1, mem_dim)
         horizon: Optional[int] = None,
         gamma: Optional[float] = None,
-    ) -> torch.Tensor:
+    ) -> Dict[str, torch.Tensor]:
         """
         Multi-step planner v1 ("repeat"):
           - repeats action a for horizon steps via world model rollout;
@@ -3288,6 +3440,7 @@ class Trainer:
             dtype=H.dtype,
         )
         r_prev = torch.zeros(A, 1, device=device, dtype=H.dtype)
+        uncertainty_acc = torch.zeros(A, device=device, dtype=H.dtype)
         disc = torch.ones(A, device=device, dtype=H.dtype)
         W_last = None
 
@@ -3295,7 +3448,7 @@ class Trainer:
             w_t, h_w_local, z_hat, H_hat = self.agent.world_model.forward_step(
                 z, H, a_cand, h_w_local
             )
-            reward_main, reward_safety, h_s_local, r_prev = self._planner_step_rewards_from_self(
+            reward_main, reward_safety, reward_unc, h_s_local, r_prev = self._planner_step_rewards(
                 W_t=w_t,
                 H_t=H_hat,
                 action_t=a_cand,
@@ -3308,6 +3461,7 @@ class Trainer:
             )
             scores_main = scores_main + disc * reward_main
             scores_safety = scores_safety + disc * reward_safety
+            uncertainty_acc = uncertainty_acc + disc * reward_unc
             disc = disc * gamma
 
             z = z_hat.detach()
@@ -3320,13 +3474,41 @@ class Trainer:
             scores_main = scores_main + disc * V_main_tail
             scores_safety = scores_safety + disc * V_safety_tail
 
-        penalized = self._apply_safety_penalty(scores_main, scores_safety)
-        penalized = penalized - penalized.mean()
-        std = penalized.std()
-        if std > 1e-6:
-            penalized = penalized / std
+        return {
+            "q_main": scores_main.view(-1),
+            "q_safety": scores_safety.view(-1),
+            "q_uncertainty": uncertainty_acc.view(-1),
+            "horizon_used": torch.tensor(float(max(1, int(horizon))), device=device, dtype=H.dtype),
+        }
 
-        return penalized.unsqueeze(0)
+    def compute_planner_logits(
+        self,
+        z_obs: torch.Tensor,      # (1, obs_dim)
+        H_t: torch.Tensor,        # (1, h_dim)
+        h_w: torch.Tensor,        # (1, 1, w_dim)
+        traits: torch.Tensor,     # (1, trait_dim)
+        M: torch.Tensor,          # (1, mem_dim)
+        horizon: Optional[int] = None,
+        gamma: Optional[float] = None,
+        return_estimate: bool = False,
+    ) -> Any:
+        est = self._planner_estimate_repeat(
+            z_obs=z_obs,
+            H_t=H_t,
+            h_w=h_w,
+            traits=traits,
+            M=M,
+            horizon=horizon,
+            gamma=gamma,
+        )
+        if return_estimate:
+            return est
+        return self._planner_logits_from_q(
+            est["q_main"],
+            est["q_safety"],
+            safety_threshold=self.safety_threshold,
+            safety_penalty_coef=self.safety_penalty_coef,
+        )
 
     def _planner_skill_logits(
         self,
@@ -3382,7 +3564,7 @@ class Trainer:
                 w_t, h_w_local, z_hat, H_hat = self.agent.world_model.forward_step(
                     z_cur, H_cur, a_t, h_w_local
                 )
-                reward_main, _reward_safety, h_s_local, r_prev = self._planner_step_rewards_from_self(
+                reward_main, _reward_safety, _reward_unc, h_s_local, r_prev = self._planner_step_rewards(
                     W_t=w_t,
                     H_t=H_hat,
                     action_t=a_t,
@@ -3413,14 +3595,14 @@ class Trainer:
             scores_t = torch.cat([scores_t, pad], dim=1)
         return scores_t
 
-    def _planner_logits_multistep(
+    def _planner_estimate_multistep(
         self,
         z_obs: torch.Tensor,   # (1, obs_dim)
         H_t: torch.Tensor,     # (1, h_dim)
         h_w: torch.Tensor,     # (1, 1, w_dim)
         traits: torch.Tensor,  # (1, trait_dim)
         M: torch.Tensor,       # (1, mem_dim)
-    ) -> torch.Tensor:
+    ) -> Dict[str, torch.Tensor]:
         """
         Batched multi-step planner ("rollout") with reward-aware safety scoring.
         """
@@ -3448,6 +3630,7 @@ class Trainer:
             a = torch.arange(A, device=device).repeat_interleave(R)
             scores_main = torch.zeros(batch, device=device)
             scores_safety = torch.zeros(batch, device=device)
+            scores_unc = torch.zeros(batch, device=device)
             disc = torch.ones(batch, device=device)
             h_s_cur = torch.zeros(
                 1,
@@ -3463,7 +3646,7 @@ class Trainer:
                 W, h_cur, z_hat, H_hat = self.agent.world_model.forward_step(
                     z, H_cur, a, h_cur
                 )
-                reward_main, reward_safety, h_s_cur, r_prev = self._planner_step_rewards_from_self(
+                reward_main, reward_safety, reward_unc, h_s_cur, r_prev = self._planner_step_rewards(
                     W_t=W,
                     H_t=H_hat,
                     action_t=a,
@@ -3476,6 +3659,7 @@ class Trainer:
                 )
                 scores_main = scores_main + disc * reward_main
                 scores_safety = scores_safety + disc * reward_safety
+                scores_unc = scores_unc + disc * reward_unc
                 disc = disc * gamma
 
                 V_main = self.agent.value_model(W, H_hat, traits_rep, M_rep).view(-1)
@@ -3513,22 +3697,47 @@ class Trainer:
 
             q_main = scores_main.view(A, R).mean(dim=1)
             q_safety = scores_safety.view(A, R).mean(dim=1)
-            penalized = self._apply_safety_penalty(q_main, q_safety)
-            penalized = penalized - penalized.mean()
-            std = penalized.std()
-            if std > 1e-6:
-                penalized = penalized / std
+            q_uncertainty = scores_unc.view(A, R).mean(dim=1)
+            return {
+                "q_main": q_main.view(-1),
+                "q_safety": q_safety.view(-1),
+                "q_uncertainty": q_uncertainty.view(-1),
+                "horizon_used": torch.tensor(float(max(1, int(H))), device=device, dtype=H_cur.dtype),
+            }
 
-        return penalized.unsqueeze(0)
+    def _planner_logits_multistep(
+        self,
+        z_obs: torch.Tensor,
+        H_t: torch.Tensor,
+        h_w: torch.Tensor,
+        traits: torch.Tensor,
+        M: torch.Tensor,
+        return_estimate: bool = False,
+    ) -> Any:
+        est = self._planner_estimate_multistep(
+            z_obs=z_obs,
+            H_t=H_t,
+            h_w=h_w,
+            traits=traits,
+            M=M,
+        )
+        if return_estimate:
+            return est
+        return self._planner_logits_from_q(
+            est["q_main"],
+            est["q_safety"],
+            safety_threshold=self.safety_threshold,
+            safety_penalty_coef=self.safety_penalty_coef,
+        )
 
-    def _planner_logits_beam(
+    def _planner_estimate_beam(
         self,
         z_obs: torch.Tensor,   # (1, obs_dim)
         H_t: torch.Tensor,     # (1, h_dim)
         h_w: torch.Tensor,     # (1, 1, w_dim)
         traits: torch.Tensor,  # (1, trait_dim)
         M: torch.Tensor,       # (1, mem_dim)
-    ) -> torch.Tensor:
+    ) -> Dict[str, torch.Tensor]:
         """
         Beam-search planner over primitive actions using the learned world model.
 
@@ -3553,6 +3762,7 @@ class Trainer:
 
             q_main = torch.zeros(A, device=device, dtype=z_obs.dtype)
             q_safety = torch.zeros(A, device=device, dtype=z_obs.dtype)
+            q_uncertainty = torch.zeros(A, device=device, dtype=z_obs.dtype)
 
             for a0 in range(A):
                 a0_t = torch.tensor([int(a0)], device=device, dtype=torch.long)
@@ -3566,7 +3776,7 @@ class Trainer:
                 )
                 r_prev = torch.zeros(1, 1, device=device, dtype=H_cur.dtype)
                 env_desc_cur = self._planner_default_env_desc(1, device=device, dtype=H_cur.dtype)
-                r0_main, r0_safety, h_s_cur, r_prev = self._planner_step_rewards_from_self(
+                r0_main, r0_safety, r0_unc, h_s_cur, r_prev = self._planner_step_rewards(
                     W_t=W0,
                     H_t=H_cur,
                     action_t=a0_t,
@@ -3585,6 +3795,7 @@ class Trainer:
                 beam_prev_r = r_prev.detach()
                 beam_main = r0_main.clone()
                 beam_safety = r0_safety.clone()
+                beam_unc = r0_unc.clone()
 
                 disc = gamma
                 for _ in range(1, H):
@@ -3603,7 +3814,7 @@ class Trainer:
                     M_rep = M.expand(n, -1)
                     env_desc_rep = self._planner_default_env_desc(n, device=device, dtype=H_next.dtype)
 
-                    r_main, r_safety, hs_next, r_next = self._planner_step_rewards_from_self(
+                    r_main, r_safety, r_unc, hs_next, r_next = self._planner_step_rewards(
                         W_t=Wn,
                         H_t=H_next,
                         action_t=a_rep,
@@ -3617,6 +3828,7 @@ class Trainer:
 
                     main_new = beam_main.repeat_interleave(A) + disc * r_main
                     safety_new = beam_safety.repeat_interleave(A) + disc * r_safety
+                    unc_new = beam_unc.repeat_interleave(A) + disc * r_unc
 
                     V_main_tail = self.agent.value_model(Wn, H_next, traits_rep, M_rep).view(-1)
                     V_safety_tail = self.agent.value_model(Wn, H_next, traits_rep_safety, M_rep).view(-1)
@@ -3634,6 +3846,7 @@ class Trainer:
                     beam_prev_r = r_next[idx].detach().view(-1, 1)
                     beam_main = main_new[idx]
                     beam_safety = safety_new[idx]
+                    beam_unc = unc_new[idx]
                     disc = disc * gamma
 
                 beam_n = int(beam_main.numel())
@@ -3646,44 +3859,85 @@ class Trainer:
                     V_safety_tail = self.agent.value_model(W_tail, beam_H, traits_rep_safety, M_rep).view(-1)
                     final_main = beam_main + disc * V_main_tail
                     final_safety = beam_safety + disc * V_safety_tail
+                    final_unc = beam_unc
                 else:
                     final_main = beam_main
                     final_safety = beam_safety
+                    final_unc = beam_unc
                 penalized = self._apply_safety_penalty(final_main, final_safety)
                 best = int(torch.argmax(penalized).item()) if penalized.numel() > 0 else 0
                 q_main[a0] = final_main[best]
                 q_safety[a0] = final_safety[best]
+                q_uncertainty[a0] = final_unc[best]
 
-            penalized = self._apply_safety_penalty(q_main, q_safety)
-            penalized = penalized - penalized.mean()
-            std = penalized.std()
-            if std > 1e-6:
-                penalized = penalized / std
-            return penalized.unsqueeze(0)
+            return {
+                "q_main": q_main.view(-1),
+                "q_safety": q_safety.view(-1),
+                "q_uncertainty": q_uncertainty.view(-1),
+                "horizon_used": torch.tensor(float(max(1, int(H))), device=device, dtype=z_obs.dtype),
+            }
 
-    def _get_planner_logits(
+    def _planner_logits_beam(
         self,
         z_obs: torch.Tensor,
         H_t: torch.Tensor,
         h_w: torch.Tensor,
         traits: torch.Tensor,
         M: torch.Tensor,
-    ) -> torch.Tensor:
+        return_estimate: bool = False,
+    ) -> Any:
+        est = self._planner_estimate_beam(
+            z_obs=z_obs,
+            H_t=H_t,
+            h_w=h_w,
+            traits=traits,
+            M=M,
+        )
+        if return_estimate:
+            return est
+        return self._planner_logits_from_q(
+            est["q_main"],
+            est["q_safety"],
+            safety_threshold=self.safety_threshold,
+            safety_penalty_coef=self.safety_penalty_coef,
+        )
+
+    def _get_planner_estimate(
+        self,
+        z_obs: torch.Tensor,
+        H_t: torch.Tensor,
+        h_w: torch.Tensor,
+        traits: torch.Tensor,
+        M: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
         """
-        Унифицированный интерфейс планировщика:
-          - planner_mode="repeat"  → compute_planner_logits (v1),
-          - planner_mode="rollout" → батчевый _planner_logits_multistep.
+        Planner API 2.0:
+          planner -> Q-estimates, logits are derived in a separate step.
         """
         if self.planner_mode in {"none", "", None}:
-            return torch.zeros((1, self.env.n_actions), device=self.device)
+            zeros = torch.zeros(self.env.n_actions, device=self.device)
+            return {
+                "q_main": zeros,
+                "q_safety": zeros,
+                "q_uncertainty": zeros,
+                "horizon_used": torch.tensor(0.0, device=self.device),
+            }
         if self.use_skills and self.planner_mode == "skills":
-            return self._planner_skill_logits(
+            logits = self._planner_skill_logits(
                 z_obs=z_obs,
                 H_t=H_t,
                 h_w=h_w,
                 traits=traits,
                 M=M,
             )
+            q_main = logits.view(-1)
+            zeros = torch.zeros_like(q_main)
+            return {
+                "q_main": q_main,
+                "q_safety": zeros,
+                "q_uncertainty": zeros,
+                "horizon_used": torch.tensor(float(max(1, int(self.planning_horizon))), device=logits.device, dtype=logits.dtype),
+            }
 
         if self.planner_mode == "repeat":
             return self.compute_planner_logits(
@@ -3694,6 +3948,7 @@ class Trainer:
                 M=M,
                 horizon=self.planning_horizon,
                 gamma=self.planner_gamma,
+                return_estimate=True,
             )
         elif self.planner_mode == "rollout":
             return self._planner_logits_multistep(
@@ -3702,6 +3957,7 @@ class Trainer:
                 h_w=h_w,
                 traits=traits,
                 M=M,
+                return_estimate=True,
             )
         elif self.planner_mode == "beam":
             return self._planner_logits_beam(
@@ -3710,9 +3966,38 @@ class Trainer:
                 h_w=h_w,
                 traits=traits,
                 M=M,
+                return_estimate=True,
             )
         else:
             raise ValueError(f"Unknown planner_mode: {self.planner_mode}")
+
+    def _get_planner_logits(
+        self,
+        z_obs: torch.Tensor,
+        H_t: torch.Tensor,
+        h_w: torch.Tensor,
+        traits: torch.Tensor,
+        M: torch.Tensor,
+    ) -> torch.Tensor:
+        est = self._get_planner_estimate(
+            z_obs=z_obs,
+            H_t=H_t,
+            h_w=h_w,
+            traits=traits,
+            M=M,
+        )
+        q_main = est.get("q_main")
+        q_safety = est.get("q_safety")
+        if not isinstance(q_main, torch.Tensor):
+            return torch.zeros((1, self.env.n_actions), device=self.device)
+        if not isinstance(q_safety, torch.Tensor):
+            q_safety = torch.zeros_like(q_main)
+        return self._planner_logits_from_q(
+            q_main=q_main,
+            q_safety=q_safety,
+            safety_threshold=self.safety_threshold,
+            safety_penalty_coef=self.safety_penalty_coef,
+        )
 
     def _planner_reliability(
         self,

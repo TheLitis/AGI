@@ -50,3 +50,9 @@ def test_beam_planner_logits_shape_and_finite():
     assert tuple(logits.shape) == (1, pool.n_actions)
     assert torch.isfinite(logits).all()
 
+    est = trainer._get_planner_estimate(z_obs=z_obs, H_t=H_t, h_w=h_w, traits=traits, M=M)
+    assert isinstance(est, dict)
+    assert tuple(est["q_main"].shape) == (pool.n_actions,)
+    assert tuple(est["q_safety"].shape) == (pool.n_actions,)
+    assert tuple(est["q_uncertainty"].shape) == (pool.n_actions,)
+    assert torch.isfinite(est["q_main"]).all()

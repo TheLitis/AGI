@@ -119,6 +119,31 @@ class WorldModel(nn.Module):
         )
         self.head_obs = nn.Linear(w_dim, obs_dim)
         self.head_h = nn.Linear(w_dim, h_dim)
+        # Event/reward heads used by planner for reward-aware imagination.
+        self.head_alive = nn.Linear(w_dim, 1)
+        self.head_food = nn.Linear(w_dim, 1)
+        self.head_damage = nn.Linear(w_dim, 1)
+        self.head_move = nn.Linear(w_dim, 1)
+        self.head_reward = nn.Linear(w_dim, 1)
+
+    def predict_event_components(self, w_t: torch.Tensor) -> dict:
+        """
+        Predict event probabilities and environment reward proxy from world latent.
+        w_t: (..., w_dim)
+        Returns dict with tensors shaped (..., 1).
+        """
+        alive = torch.sigmoid(self.head_alive(w_t))
+        food = torch.sigmoid(self.head_food(w_t))
+        damage = torch.sigmoid(self.head_damage(w_t))
+        move = torch.sigmoid(self.head_move(w_t))
+        reward_env = self.head_reward(w_t)
+        return {
+            "alive": alive,
+            "food": food,
+            "damage": damage,
+            "move": move,
+            "reward_env": reward_env,
+        }
 
     def forward_step(
         self,
@@ -169,6 +194,8 @@ class WorldModel(nn.Module):
         z_obs_seq: torch.Tensor,
         H_seq: torch.Tensor,
         a_seq: torch.Tensor,
+        event_targets: Optional[dict] = None,
+        event_weights: Optional[dict] = None,
     ) -> torch.Tensor:
         b, T, obs_dim = z_obs_seq.shape
         z_in = z_obs_seq[:, :-1, :]
@@ -189,7 +216,63 @@ class WorldModel(nn.Module):
 
         loss_z = F.mse_loss(z_hat, z_target)
         loss_h = F.mse_loss(H_hat, H_target)
-        return loss_z + loss_h
+        total = loss_z + loss_h
+
+        if isinstance(event_targets, dict):
+            weights = event_weights or {}
+            w_alive = float(weights.get("alive", 0.5))
+            w_food = float(weights.get("food", 0.5))
+            w_damage = float(weights.get("damage", 0.5))
+            w_move = float(weights.get("move", 0.3))
+            w_reward = float(weights.get("reward", 0.2))
+
+            preds = self.predict_event_components(out)
+            eps = 1.0e-6
+
+            def _event_target(name: str) -> Optional[torch.Tensor]:
+                t = event_targets.get(name)
+                if not isinstance(t, torch.Tensor):
+                    return None
+                tt = t.to(device=out.device, dtype=out.dtype)
+                if tt.dim() == 2:
+                    tt = tt.unsqueeze(-1)
+                if tt.shape[:2] != out.shape[:2]:
+                    return None
+                return tt
+
+            alive_t = _event_target("alive")
+            if alive_t is not None and w_alive > 0.0:
+                total = total + w_alive * F.binary_cross_entropy(
+                    preds["alive"].clamp(min=eps, max=1.0 - eps),
+                    alive_t.clamp(min=0.0, max=1.0),
+                )
+
+            food_t = _event_target("food")
+            if food_t is not None and w_food > 0.0:
+                total = total + w_food * F.binary_cross_entropy(
+                    preds["food"].clamp(min=eps, max=1.0 - eps),
+                    food_t.clamp(min=0.0, max=1.0),
+                )
+
+            damage_t = _event_target("damage")
+            if damage_t is not None and w_damage > 0.0:
+                total = total + w_damage * F.binary_cross_entropy(
+                    preds["damage"].clamp(min=eps, max=1.0 - eps),
+                    damage_t.clamp(min=0.0, max=1.0),
+                )
+
+            move_t = _event_target("move")
+            if move_t is not None and w_move > 0.0:
+                total = total + w_move * F.binary_cross_entropy(
+                    preds["move"].clamp(min=eps, max=1.0 - eps),
+                    move_t.clamp(min=0.0, max=1.0),
+                )
+
+            reward_t = _event_target("reward")
+            if reward_t is not None and w_reward > 0.0:
+                total = total + w_reward * F.mse_loss(preds["reward_env"], reward_t)
+
+        return total
 
     def curiosity_error(
         self,

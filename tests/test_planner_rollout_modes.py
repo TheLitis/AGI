@@ -48,6 +48,20 @@ def _planner_logits(trainer: Trainer, agent: ProtoCreatureAgent, obs: dict) -> t
     return trainer._get_planner_logits(z_obs=z_obs, H_t=H_t, h_w=h_w, traits=traits, M=M)
 
 
+def _planner_estimate(trainer: Trainer, agent: ProtoCreatureAgent, obs: dict) -> dict:
+    patch_t = torch.from_numpy(obs["patch"]).unsqueeze(0).long()
+    H_t = torch.tensor([[float(obs["energy"])]], dtype=torch.float32)
+    scenario_t = torch.tensor([int(obs.get("scenario_id", 0))], dtype=torch.long)
+    env_t = torch.tensor([int(obs.get("env_id", 0))], dtype=torch.long)
+    env_desc_t = trainer._env_desc_from_ids(env_t)
+    text_t = trainer._text_tokens_from_ids(env_t, scenario_t)
+    z_obs = agent.perception(patch_t, H_t, scenario_t, env_desc_t, text_tokens=text_t)
+    h_w = torch.zeros(1, 1, agent.w_dim, dtype=torch.float32)
+    traits = trainer._mixed_traits()
+    M = agent.memory.clone()
+    return trainer._get_planner_estimate(z_obs=z_obs, H_t=H_t, h_w=h_w, traits=traits, M=M)
+
+
 def test_repeat_planner_logits_shape_and_finite():
     trainer, agent, obs = _build_trainer_for_mode("repeat")
     logits = _planner_logits(trainer, agent, obs)
@@ -60,3 +74,24 @@ def test_rollout_planner_logits_shape_and_finite():
     logits = _planner_logits(trainer, agent, obs)
     assert tuple(logits.shape) == (1, trainer.env.n_actions)
     assert torch.isfinite(logits).all()
+
+
+def test_repeat_planner_estimate_exposes_q_values():
+    trainer, agent, obs = _build_trainer_for_mode("repeat")
+    est = _planner_estimate(trainer, agent, obs)
+    assert isinstance(est, dict)
+    assert tuple(est["q_main"].shape) == (trainer.env.n_actions,)
+    assert tuple(est["q_safety"].shape) == (trainer.env.n_actions,)
+    assert tuple(est["q_uncertainty"].shape) == (trainer.env.n_actions,)
+    assert torch.isfinite(est["q_main"]).all()
+    assert torch.isfinite(est["q_safety"]).all()
+
+
+def test_rollout_planner_estimate_exposes_q_values():
+    trainer, agent, obs = _build_trainer_for_mode("rollout")
+    est = _planner_estimate(trainer, agent, obs)
+    assert isinstance(est, dict)
+    assert tuple(est["q_main"].shape) == (trainer.env.n_actions,)
+    assert tuple(est["q_safety"].shape) == (trainer.env.n_actions,)
+    assert tuple(est["q_uncertainty"].shape) == (trainer.env.n_actions,)
+    assert torch.isfinite(est["q_main"]).all()
