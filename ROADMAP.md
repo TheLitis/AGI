@@ -1,6 +1,6 @@
 ﻿# ROADMAP (Synced)
 
-Updated: 2026-02-16
+Updated: 2026-02-17
 
 Source of truth: `ROADMAP_v2.md`.
 
@@ -9,8 +9,8 @@ Source of truth: `ROADMAP_v2.md`.
 - Current gates: `gate0=pass`, `gate1=pass`, `gate2=pass`, `gate3=pass`, `gate4=pass`.
 - Independent reproducibility rerun: `reports/agi_v1.quick.seed01234.rebaseline_phase2.rerun2.json` (`gate0..gate4=pass`).
 - Internal mountain status (Gate2-Strict, isolated 5-seed):
-  - Mountain #2 (`long_horizon`) = `open` (`score = 0.8135`, threshold `>= 0.65`).
-  - Mountain #3 (`lifelong`) = `open` (`forgetting_gap = 0.2033`, `forward_transfer = 1.7203`).
+  - Mountain #2 (`long_horizon`) = `open` (`score = 0.6847`, threshold `>= 0.65`) via `reports/bench_long_horizon_quick_seed01234.p0s2_rewardaware.json`.
+  - Mountain #3 (`lifelong`) = `open` (`forgetting_gap = 0.7799`, `forward_transfer = 0.6950`) via `reports/bench_lifelong_quick_seed01234.p0s2_rewardaware.json`.
 - Canonical baseline health:
   - `core` suite = `ok`, `language` suite = `ok` (no runtime `OSError: [Errno 22] Invalid argument`).
   - `overall.confidence = 0.8836` (above Gate4 threshold `>= 0.80`).
@@ -81,20 +81,20 @@ Source of truth: `ROADMAP_v2.md`.
 - note:
   - these priority snapshots are directional diagnostics, not the canonical validated AGI reference.
 - 5-seed quick snapshots (priority suites, isolated runs, latest):
-  - `reports/bench_long_horizon_quick_seed01234.phase1_m23.json`
-    - `long_horizon.score = 0.8135`
-    - `long_horizon.ci.half_width = 0.0144`
-  - `reports/bench_lifelong_quick_seed01234.phase1_m23.json`
-    - `lifelong.score = 0.5852`
-    - `lifelong.forgetting_gap = 0.2031`
-    - `lifelong.forward_transfer = 1.7203`
-    - `lifelong.ci.half_width = 0.0648`
+  - `reports/bench_long_horizon_quick_seed01234.p0s2_rewardaware.json`
+    - `long_horizon.score = 0.6847`
+    - `long_horizon.goal_completion_rate = 0.7875`
+    - `long_horizon.timeout_rate = 0.4375`
+  - `reports/bench_lifelong_quick_seed01234.p0s2_rewardaware.json`
+    - `lifelong.score = 0.5347`
+    - `lifelong.forgetting_gap = 0.7799`
+    - `lifelong.forward_transfer = 0.6950`
   - `reports/bench_safety_quick_seed01234.autonomy4.json`
     - `safety.score = 0.7444`
     - `constraint_compliance = 0.55`
     - `catastrophic_fail_rate = 0.25`
 - mountain opener check:
-  - `python scripts/check_mountains_open.py --long-horizon-report reports/bench_long_horizon_quick_seed01234.phase1_m23.json --lifelong-report reports/bench_lifelong_quick_seed01234.phase1_m23.json`
+  - `python scripts/check_mountains_open.py --long-horizon-report reports/bench_long_horizon_quick_seed01234.p0s2_rewardaware.json --lifelong-report reports/bench_lifelong_quick_seed01234.p0s2_rewardaware.json`
   - result: `[OPEN]`
 
 ## AGI Claim Rule

@@ -1,6 +1,6 @@
 ﻿# ROADMAP v2: Gate-Driven AGI-Ready Program
 
-Updated: 2026-02-16
+Updated: 2026-02-17
 
 ## 1. Goal
 - Maintain a reproducible AGI-ready research contour with measurable criteria across all 8 technical mountains.
@@ -42,20 +42,20 @@ Updated: 2026-02-16
   - `lifelong.score = 0.5718`
   - `safety.score = 0.7703`
 - Historical priority-suite 5-seed quick snapshots (isolated):
-  - `reports/bench_long_horizon_quick_seed01234.phase1_m23.json`
-    - `long_horizon.score = 0.8135`
-    - `long_horizon.ci.half_width = 0.0144`
-  - `reports/bench_lifelong_quick_seed01234.phase1_m23.json`
-    - `lifelong.score = 0.5852`
-    - `lifelong.forgetting_gap = 0.2031`
-    - `lifelong.forward_transfer = 1.7203`
-    - `lifelong.ci.half_width = 0.0648`
+  - `reports/bench_long_horizon_quick_seed01234.p0s2_rewardaware.json`
+    - `long_horizon.score = 0.6847`
+    - `long_horizon.goal_completion_rate = 0.7875`
+    - `long_horizon.timeout_rate = 0.4375`
+  - `reports/bench_lifelong_quick_seed01234.p0s2_rewardaware.json`
+    - `lifelong.score = 0.5347`
+    - `lifelong.forgetting_gap = 0.7799`
+    - `lifelong.forward_transfer = 0.6950`
   - `reports/bench_safety_quick_seed01234.autonomy4.json`
     - `safety.score = 0.7444`
     - `constraint_compliance = 0.55`
     - `catastrophic_fail_rate = 0.25`
 - Internal Gate2-Strict mountain opener:
-  - `python scripts/check_mountains_open.py --long-horizon-report reports/bench_long_horizon_quick_seed01234.phase1_m23.json --lifelong-report reports/bench_lifelong_quick_seed01234.phase1_m23.json`
+  - `python scripts/check_mountains_open.py --long-horizon-report reports/bench_long_horizon_quick_seed01234.p0s2_rewardaware.json --lifelong-report reports/bench_lifelong_quick_seed01234.p0s2_rewardaware.json`
   - result: `[OPEN]` (Mountain #2/#3 opened on isolated suites)
 - Infra update completed:
   - dedicated `long_horizon` suite added to AGI-bench runs
