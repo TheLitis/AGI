@@ -447,6 +447,9 @@ def run_experiment(
     beta_conflict: float = 0.05,
     beta_uncertainty: float = 0.05,
     planning_coef: float = 0.3,
+    planner_world_reward_blend: float = 0.70,
+    safety_threshold: float = 0.0,
+    safety_penalty_coef: float = 1.0,
     action_mask_internalization_coef: float = 0.10,
     action_mask_dropout_prob: float = 0.0,
     action_mask_prediction_coef: float = 0.10,
@@ -490,6 +493,7 @@ def run_experiment(
         schedule_mode: env scheduling across scenarios ("iid", "round_robin", "curriculum").
         episodes_per_phase: curriculum phase length for scenario scheduling.
         planning_horizon / planner_mode / planner_rollouts: planner settings.
+        planner_world_reward_blend / safety_threshold / safety_penalty_coef: planner reward/safety controls.
         max_steps_env: environment episode length cap for GridWorld/Mixed pools.
         max_energy_env: optional energy budget override for GridWorld/Mixed pools.
         log_dir: optional directory to save per-run JSONL logs (ExperimentLogger).
@@ -523,6 +527,9 @@ def run_experiment(
         "[Config] "
         f"planner_mode={planner_mode}, planner_rollouts={planner_rollouts}, "
         f"planning_coef={planning_coef:.3f}, "
+        f"planner_world_reward_blend={float(planner_world_reward_blend):.3f}, "
+        f"safety_threshold={float(safety_threshold):.3f}, "
+        f"safety_penalty_coef={float(safety_penalty_coef):.3f}, "
         f"beta_conflict={beta_conflict:.3f}, beta_uncertainty={beta_uncertainty:.3f}, "
         f"invalid_action_coef={action_mask_internalization_coef:.3f}, "
         f"action_mask_dropout_prob={float(action_mask_dropout_prob):.3f}, "
@@ -625,6 +632,9 @@ def run_experiment(
         planner_gamma=gamma,
         planner_mode=planner_mode,
         planner_rollouts=planner_rollouts,
+        planner_world_reward_blend=float(planner_world_reward_blend),
+        safety_threshold=float(safety_threshold),
+        safety_penalty_coef=float(safety_penalty_coef),
         train_env_ids=env_pool.train_env_ids,
         test_env_ids=env_pool.test_env_ids,
         env_descriptors=env_descriptors,
@@ -1086,6 +1096,9 @@ def run_experiment(
             "planning_horizon": planning_horizon,
             "planner_mode": planner_mode,
             "planner_rollouts": planner_rollouts,
+            "planner_world_reward_blend": float(planner_world_reward_blend),
+            "safety_threshold": float(safety_threshold),
+            "safety_penalty_coef": float(safety_penalty_coef),
             "n_steps": n_steps,
             "stage2_updates": int(max(1, stage2_updates)),
             "stage4_updates": int(max(1, stage4_updates)),

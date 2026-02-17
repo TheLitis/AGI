@@ -1375,6 +1375,24 @@ def parse_args() -> argparse.Namespace:
     mask_group.add_argument("--unmasked", "--unmasked-only", dest="unmasked_only", action="store_true", help="Report unmasked metrics only (tools).")
     parser.add_argument("--use-skills", action="store_true", help="Enable hierarchical skills.")
     parser.add_argument(
+        "--planner-world-reward-blend",
+        type=float,
+        default=0.70,
+        help="Blend between world-event reward and self-model utility in planner rollouts (0..1).",
+    )
+    parser.add_argument(
+        "--safety-penalty-coef",
+        type=float,
+        default=1.0,
+        help="Safety penalty multiplier applied to planner Q-values.",
+    )
+    parser.add_argument(
+        "--safety-threshold",
+        type=float,
+        default=0.0,
+        help="Safety threshold used by planner penalty: risk = relu(threshold - q_safety).",
+    )
+    parser.add_argument(
         "--skill-mode",
         type=str,
         default="handcrafted",
@@ -1408,6 +1426,9 @@ def _run_suite(
     auto_force_cpu_repo: bool,
     report: Dict[str, Any],
     report_path: Path,
+    planner_world_reward_blend: float = 0.70,
+    safety_penalty_coef: float = 1.0,
+    safety_threshold: float = 0.0,
 ) -> Dict[str, Any]:
     if not isinstance(report.get("suites"), list):
         report["suites"] = []
@@ -1438,6 +1459,9 @@ def _run_suite(
     planning_horizon = 12
     planner_rollouts = 4
     planning_coef = 0.30
+    planner_world_reward_blend_base = float(max(0.0, min(1.0, planner_world_reward_blend)))
+    safety_penalty_coef_base = float(safety_penalty_coef)
+    safety_threshold_base = float(safety_threshold)
     eval_policy = "sample"
     lifelong_eps = 50
     stage1_steps = 5000
@@ -1555,6 +1579,9 @@ def _run_suite(
             "stage2_updates": int(stage2_updates),
             "stage4_updates": int(stage4_updates),
             "eval_policy": str(eval_policy),
+            "planner_world_reward_blend": float(planner_world_reward_blend_base),
+            "safety_penalty_coef": float(safety_penalty_coef_base),
+            "safety_threshold": float(safety_threshold_base),
             "run_self_reflection": bool(run_self_reflection),
             "run_stage3c": bool(run_stage3c),
             "run_lifecycle": bool(run_lifecycle),
@@ -1625,6 +1652,9 @@ def _run_suite(
                     run_mode = str(mode)
                     run_eval_policy = str(eval_policy)
                     run_planning_coef = float(planning_coef)
+                    run_planner_world_reward_blend = float(planner_world_reward_blend_base)
+                    run_safety_penalty_coef = float(safety_penalty_coef_base)
+                    run_safety_threshold = float(safety_threshold_base)
                     case_max_steps_env = (
                         int(case.max_steps_env)
                         if isinstance(case.max_steps_env, int) and int(case.max_steps_env) > 0
@@ -1693,6 +1723,9 @@ def _run_suite(
                         planner_mode="rollout",
                         planner_rollouts=int(planner_rollouts),
                         planning_coef=float(run_planning_coef),
+                        planner_world_reward_blend=float(run_planner_world_reward_blend),
+                        safety_penalty_coef=float(run_safety_penalty_coef),
+                        safety_threshold=float(run_safety_threshold),
                         lifelong_episodes_per_chapter=int(lifelong_eps),
                         minigrid_scenarios=case.minigrid_scenarios,
                         computer_scenarios=case.computer_scenarios,
@@ -2296,6 +2329,9 @@ def main() -> int:
         "masked_only": bool(args.masked_only),
         "unmasked_only": bool(args.unmasked_only),
         "eval_max_steps": int(args.max_episode_steps_eval),
+        "planner_world_reward_blend": float(args.planner_world_reward_blend),
+        "safety_penalty_coef": float(args.safety_penalty_coef),
+        "safety_threshold": float(args.safety_threshold),
         "force_cpu": bool(effective_force_cpu),
         "auto_force_cpu_repo": bool(auto_force_cpu_repo),
     }
@@ -2403,6 +2439,9 @@ def main() -> int:
                 auto_force_cpu_repo=bool(auto_force_cpu_repo),
                 report=report,
                 report_path=report_path,
+                planner_world_reward_blend=float(args.planner_world_reward_blend),
+                safety_penalty_coef=float(args.safety_penalty_coef),
+                safety_threshold=float(args.safety_threshold),
             )
     except KeyboardInterrupt:
         _save_report(report_path, report)

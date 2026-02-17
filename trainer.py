@@ -241,6 +241,7 @@ class Trainer:
         planner_rollouts: int = 4,
         safety_threshold: float = 0.0,
         safety_penalty_coef: float = 1.0,
+        planner_world_reward_blend: float = 0.70,
         action_mask_internalization_coef: float = 0.10,
         action_mask_dropout_prob: float = 0.0,
         action_mask_prediction_coef: float = 0.10,
@@ -450,7 +451,7 @@ class Trainer:
         self.planner_rollouts = planner_rollouts
         # Blend imagined reward from world-model event heads with self-model utility.
         # 1.0 = world-only, 0.0 = self-only.
-        self.planner_world_reward_blend = 0.70
+        self.planner_world_reward_blend = float(max(0.0, min(1.0, planner_world_reward_blend)))
 
         # Pipeline overview:
         #   Stage 1: collect_random_experience + train_world_model

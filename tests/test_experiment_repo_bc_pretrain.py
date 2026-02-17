@@ -38,6 +38,9 @@ def test_run_experiment_reports_repo_bc_pretrain_stats():
     assert float(stats.get("episodes_used", 0.0)) >= 1.0
     assert str(result.get("device")) == "cpu"
     assert bool(result.get("config", {}).get("force_cpu")) is True
+    assert "planner_world_reward_blend" in result.get("config", {})
+    assert "safety_penalty_coef" in result.get("config", {})
+    assert "safety_threshold" in result.get("config", {})
     stage4_stats = stage_metrics.get("stage4_train_stats", {})
     assert float(stage4_stats.get("online_bc_samples", 0.0)) > 0.0
 
