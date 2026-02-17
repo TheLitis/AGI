@@ -220,6 +220,19 @@ def test_suite_specs_enable_language_social_lifelong_long_horizon():
         assert len(suite.cases) >= 1
 
 
+def test_suite_specs_include_planning_diag_cross_env_cases():
+    specs = bench._build_suite_specs(
+        minigrid_override=None,
+        computer_override=None,
+        repo_override=None,
+        ood=False,
+    )
+    suite = specs["planning_diag"]
+    assert suite.implemented is True
+    assert any(c.env_type == "gridworld" for c in suite.cases)
+    assert any(c.env_type == "minigrid" for c in suite.cases)
+
+
 def test_suite_specs_enable_tools_open_repo_case():
     specs = bench._build_suite_specs(
         minigrid_override=None,
@@ -310,9 +323,20 @@ def test_tools_metrics_template_exposes_repo_bc_runtime_config():
 
 def test_long_horizon_metrics_template_exposes_planner_reality_fields():
     tpl = bench._metric_template("long_horizon")
+    assert "success_rate" in tpl
+    assert "efficiency_score" in tpl
     assert "planner_reality_steps" in tpl
     assert "planner_score_nstep_corr" in tpl
     assert "planner_top1_match_rate" in tpl
+    assert "planner_regret_proxy_nstep" in tpl
+
+
+def test_planning_diag_metrics_template_exposes_success_efficiency_and_reality_fields():
+    tpl = bench._metric_template("planning_diag")
+    assert "success_rate" in tpl
+    assert "efficiency_score" in tpl
+    assert "planner_reality_steps" in tpl
+    assert "planner_score_nstep_corr" in tpl
     assert "planner_regret_proxy_nstep" in tpl
 
 

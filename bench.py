@@ -449,6 +449,28 @@ SUITE_METRICS_KEYS: Dict[str, List[str]] = {
         "mean_return",
         "test_mean_return",
         "horizon_utilization",
+        "success_rate",
+        "efficiency_score",
+        "timeout_rate",
+        "goal_completion_rate",
+        "mean_steps_to_goal",
+        "planner_gain",
+        "planner_reality_steps",
+        "planner_score_nstep_corr",
+        "policy_score_nstep_corr",
+        "planner_score_corr_advantage",
+        "planner_top1_match_rate",
+        "policy_top1_match_rate",
+        "planner_top1_advantage_nstep",
+        "planner_regret_proxy_nstep",
+        "catastrophic_fail_rate",
+    ],
+    "planning_diag": [
+        "mean_return",
+        "test_mean_return",
+        "horizon_utilization",
+        "success_rate",
+        "efficiency_score",
         "timeout_rate",
         "goal_completion_rate",
         "mean_steps_to_goal",
@@ -928,6 +950,24 @@ def _long_horizon_score(
     return float(max(0.0, min(1.0, float(base_score) * gain_factor)))
 
 
+def _long_horizon_efficiency_score(
+    *,
+    success_rate: Optional[float],
+    mean_steps_to_goal: Optional[float],
+    horizon_steps: Optional[int],
+) -> Optional[float]:
+    if success_rate is None:
+        return None
+    s = _clamp01(float(success_rate))
+    if s is None:
+        return None
+    if mean_steps_to_goal is None or not isinstance(horizon_steps, int) or int(horizon_steps) <= 0:
+        return float(s)
+    eff = 1.0 - (float(mean_steps_to_goal) / float(max(1, int(horizon_steps))))
+    eff = max(0.0, min(1.0, eff))
+    return float(max(0.0, min(1.0, s * eff)))
+
+
 def _safety_metrics_from_eval(eval_metrics: Optional[Dict[str, Any]]) -> Tuple[Optional[float], Optional[float]]:
     if not isinstance(eval_metrics, dict):
         return None, None
@@ -1025,7 +1065,7 @@ def _suite_ci_sample_values(suite_name: str, run_records: List[Dict[str, Any]]) 
             if s is not None:
                 values.append(float(s))
             continue
-        if suite_name == "long_horizon":
+        if suite_name in {"long_horizon", "planning_diag"}:
             res = record.get("result") or {}
             horizon_steps = None
             if isinstance(res, dict):
@@ -1158,6 +1198,24 @@ def _build_suite_specs(
             implemented=True,
             description="Long-horizon planning/survival across gridworld and minigrid tasks.",
         ),
+        "planning_diag": SuiteSpec(
+            name="planning_diag",
+            cases=[
+                BenchCase(
+                    name="planning_diag_gridworld",
+                    env_type="gridworld",
+                    max_steps_env=120,
+                    max_energy_env=160,
+                ),
+                BenchCase(
+                    name="planning_diag_minigrid",
+                    env_type="minigrid",
+                    minigrid_scenarios=minigrid_scenarios,
+                ),
+            ],
+            implemented=True,
+            description="Planner reality-check diagnostics over long-horizon tasks.",
+        ),
         "core": SuiteSpec(
             name="core",
             cases=[
@@ -1251,6 +1309,7 @@ def parse_args() -> argparse.Namespace:
         default="agi_v1",
         choices=[
             "long_horizon",
+            "planning_diag",
             "core",
             "tools",
             "tools_open",
@@ -1557,6 +1616,7 @@ def _run_suite(
                             "lifelong",
                             "lifelong_diag",
                             "long_horizon",
+                            "planning_diag",
                             "core",
                             "safety",
                         }
@@ -1575,7 +1635,7 @@ def _run_suite(
                         if isinstance(case.max_energy_env, int) and int(case.max_energy_env) > 0
                         else None
                     )
-                    if suite.name in {"long_horizon", "safety"}:
+                    if suite.name in {"long_horizon", "planning_diag", "safety"}:
                         run_eval_max_steps = int(case_max_steps_env)
                     else:
                         run_eval_max_steps = int(max(int(eval_max_steps), int(case_max_steps_env)))
@@ -1876,7 +1936,7 @@ def _run_suite(
             }
         )
         score = _tools_score(pass_rate_unmasked, invalid_action_rate, mean_steps_unmasked)
-    elif suite.name == "long_horizon":
+    elif suite.name in {"long_horizon", "planning_diag"}:
         mean_returns: List[float] = []
         test_returns: List[float] = []
         horizon_vals: List[float] = []
@@ -1970,9 +2030,15 @@ def _run_suite(
         timeout_rate = _safe_mean(timeout_vals)
         goal_completion_rate = _safe_mean(goal_completion_vals)
         mean_steps_to_goal = _safe_mean(goal_steps_vals)
+        success_rate = goal_completion_rate
         horizon_steps_ref: Optional[int] = None
         if horizon_steps_vals:
             horizon_steps_ref = int(round(float(np.mean(horizon_steps_vals))))
+        efficiency_score = _long_horizon_efficiency_score(
+            success_rate=success_rate,
+            mean_steps_to_goal=mean_steps_to_goal,
+            horizon_steps=horizon_steps_ref,
+        )
         planner_gain = _safe_mean(planner_gain_vals)
         catastrophic_rate = _safe_mean(catastrophic_vals)
         metrics.update(
@@ -1980,6 +2046,8 @@ def _run_suite(
                 "mean_return": mean_return,
                 "test_mean_return": test_mean_return,
                 "horizon_utilization": horizon_utilization,
+                "success_rate": success_rate,
+                "efficiency_score": efficiency_score,
                 "timeout_rate": timeout_rate,
                 "goal_completion_rate": goal_completion_rate,
                 "mean_steps_to_goal": mean_steps_to_goal,
