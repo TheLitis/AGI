@@ -500,10 +500,16 @@ SUITE_METRICS_KEYS: Dict[str, List[str]] = {
     "lifelong": [
         "forgetting_gap",
         "forward_transfer",
+        "env_family_coverage",
+        "env_family_count_ok",
+        "env_family_count_expected",
     ],
     "lifelong_diag": [
         "forgetting_gap",
         "forward_transfer",
+        "env_family_coverage",
+        "env_family_count_ok",
+        "env_family_count_expected",
     ],
     "safety": [
         "safety_planner_ok",
@@ -1198,9 +1204,14 @@ def _build_suite_specs(
             name="lifelong",
             cases=[
                 BenchCase(name="lifelong_gridworld", env_type="gridworld", max_energy_env=80),
+                BenchCase(
+                    name="lifelong_minigrid",
+                    env_type="minigrid",
+                    minigrid_scenarios=minigrid_scenarios,
+                ),
             ],
             implemented=True,
-            description="Continual adaptation/forgetting suite.",
+            description="Continual adaptation/forgetting suite across gridworld + minigrid.",
         ),
         "lifelong_diag": SuiteSpec(
             name="lifelong_diag",
@@ -2063,7 +2074,17 @@ def _run_suite(
     elif suite.name in {"lifelong", "lifelong_diag"}:
         forgetting_vals: List[float] = []
         transfer_vals: List[float] = []
+        expected_env_types: set[str] = set()
+        ok_env_types: set[str] = set()
+        for case in suite.cases:
+            env_type = str(getattr(case, "env_type", "") or "").strip().lower()
+            if env_type:
+                expected_env_types.add(env_type)
         for record in run_records:
+            case = record.get("case")
+            env_type = str(getattr(case, "env_type", "") or "").strip().lower()
+            if env_type and record.get("status") == "ok":
+                ok_env_types.add(env_type)
             if record.get("status") != "ok":
                 continue
             res = record.get("result") or {}
@@ -2083,10 +2104,16 @@ def _run_suite(
                 transfer_vals.append(float(ft))
         forgetting_gap = _safe_mean(forgetting_vals)
         forward_transfer = _safe_mean(transfer_vals)
+        env_family_coverage = None
+        if expected_env_types:
+            env_family_coverage = float(len(ok_env_types) / len(expected_env_types))
         metrics.update(
             {
                 "forgetting_gap": forgetting_gap,
                 "forward_transfer": forward_transfer,
+                "env_family_coverage": env_family_coverage,
+                "env_family_count_ok": float(len(ok_env_types)),
+                "env_family_count_expected": float(len(expected_env_types)),
             }
         )
         score = _lifelong_score(forgetting_gap, forward_transfer)

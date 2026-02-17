@@ -116,3 +116,63 @@ def test_run_suite_lifelong_quick_uses_sample_eval_policy(monkeypatch, tmp_path)
     assert len(calls) == 1
     assert calls[0]["mode"] == "lifelong"
     assert calls[0]["eval_policy"] == "sample"
+
+
+def test_lifelong_metrics_report_env_family_coverage_when_minigrid_skips(monkeypatch, tmp_path):
+    def fake_run_experiment(**kwargs):
+        if kwargs.get("env_type") == "minigrid":
+            raise ModuleNotFoundError("No module named 'pygame'")
+        return {
+            "stage_metrics": {
+                "eval_after_stage4_self": {
+                    "mean_return": 1.0,
+                },
+                "lifelong_eval": {
+                    "lifelong_forgetting_R1_gap": 0.1,
+                    "lifelong_adaptation_R2_delta": 0.7,
+                    "lifelong_adaptation_R3_delta": 0.5,
+                },
+            },
+            "config": {},
+        }
+
+    monkeypatch.setattr(bench, "run_experiment", fake_run_experiment)
+
+    suite = bench.SuiteSpec(
+        name="lifelong",
+        cases=[
+            bench.BenchCase(name="lifelong_gridworld", env_type="gridworld", max_energy_env=80),
+            bench.BenchCase(name="lifelong_minigrid", env_type="minigrid", minigrid_scenarios=["minigrid-empty"]),
+        ],
+        implemented=True,
+    )
+    report = {
+        "meta": {"config": {}},
+        "suites": [],
+    }
+    report_path = Path(tmp_path) / "report.json"
+
+    result = bench._run_suite(
+        suite,
+        seeds=[0],
+        variants=["full"],
+        mode="stage4",
+        quick=True,
+        quick_stub=False,
+        log_dir=str(tmp_path / "logs"),
+        use_skills=False,
+        skill_mode="handcrafted",
+        n_latent_skills=0,
+        masked_only=False,
+        unmasked_only=False,
+        eval_max_steps=64,
+        force_cpu=True,
+        auto_force_cpu_repo=True,
+        report=report,
+        report_path=report_path,
+    )
+
+    assert result["status"] == "ok"
+    assert result["metrics"]["env_family_count_expected"] == 2.0
+    assert result["metrics"]["env_family_count_ok"] == 1.0
+    assert result["metrics"]["env_family_coverage"] == 0.5

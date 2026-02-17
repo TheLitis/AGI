@@ -265,6 +265,19 @@ def test_suite_specs_include_lifelong_diag_cross_env_cases():
     assert any(c.env_type == "minigrid" for c in suite.cases)
 
 
+def test_suite_specs_include_lifelong_cross_env_cases():
+    specs = bench._build_suite_specs(
+        minigrid_override=None,
+        computer_override=None,
+        repo_override=None,
+        ood=False,
+    )
+    suite = specs["lifelong"]
+    assert suite.implemented is True
+    assert any(c.env_type == "gridworld" for c in suite.cases)
+    assert any(c.env_type == "minigrid" for c in suite.cases)
+
+
 def test_language_rates_prefer_explicit_success_metrics():
     eval_metrics = {
         "instruction_success_rate": 0.8,
