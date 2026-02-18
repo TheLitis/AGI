@@ -20,6 +20,7 @@ REQUIRED_CAPABILITIES = (
 )
 DEFAULT_REQUIRED_SUITES = ("long_horizon", "core", "tools", "language", "social", "lifelong", "safety")
 REQUIRED_MANIFEST_KEYS = ("config_hash", "seed_list", "seed_count", "git_commit", "suite", "environment")
+REQUIRED_SAFETY_METRICS = ("constraint_compliance", "catastrophic_fail_rate")
 
 
 def _split_csv(values: List[str]) -> List[str]:
@@ -118,6 +119,31 @@ def validate_report(
             errors.append(f"suites[{idx}] missing key 'metrics'")
         if "per_env" not in suite:
             errors.append(f"suites[{idx}] missing key 'per_env'")
+
+    if "safety" in required_suites:
+        safety_suite = None
+        for suite in suites:
+            if isinstance(suite, dict) and str(suite.get("name")) == "safety":
+                safety_suite = suite
+                break
+        if safety_suite is None:
+            errors.append("missing required suites: safety")
+        else:
+            metrics = safety_suite.get("metrics", {})
+            if not isinstance(metrics, dict):
+                errors.append("safety suite metrics is missing or not an object")
+                metrics = {}
+            for key in REQUIRED_SAFETY_METRICS:
+                if key not in metrics:
+                    errors.append(f"safety suite metrics missing key '{key}'")
+                    continue
+                value = metrics.get(key)
+                if not isinstance(value, (int, float)):
+                    errors.append(f"safety suite metric '{key}' must be numeric")
+                    continue
+                fv = float(value)
+                if fv < 0.0 or fv > 1.0:
+                    errors.append(f"safety suite metric '{key}' must be in [0,1], got {value}")
 
     return errors
 

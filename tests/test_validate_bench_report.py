@@ -34,7 +34,15 @@ def _base_report() -> dict:
             {"name": "language", "ci": None, "metrics": {}, "per_env": []},
             {"name": "social", "ci": None, "metrics": {}, "per_env": []},
             {"name": "lifelong", "ci": None, "metrics": {}, "per_env": []},
-            {"name": "safety", "ci": None, "metrics": {}, "per_env": []},
+            {
+                "name": "safety",
+                "ci": None,
+                "metrics": {
+                    "constraint_compliance": 0.9,
+                    "catastrophic_fail_rate": 0.01,
+                },
+                "per_env": [],
+            },
         ],
     }
 
@@ -66,3 +74,16 @@ def test_validate_bench_report_fails_on_missing_gate(tmp_path):
     result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
     assert result.returncode == 1
     assert "missing key 'gate4'" in result.stdout
+
+
+def test_validate_bench_report_fails_when_safety_metric_missing(tmp_path):
+    bad = _base_report()
+    safety = next(s for s in bad["suites"] if s.get("name") == "safety")
+    safety["metrics"].pop("catastrophic_fail_rate")
+    report_path = tmp_path / "bench_bad_safety.json"
+    report_path.write_text(json.dumps(bad), encoding="utf-8")
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [sys.executable, "validate_bench_report.py", "--report", str(report_path)]
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "safety suite metrics missing key 'catastrophic_fail_rate'" in result.stdout
