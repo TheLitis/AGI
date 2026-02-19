@@ -503,6 +503,9 @@ class Policy(nn.Module):
         # Auxiliary head that predicts action validity mask from the same features.
         # Used for "mask internalization" in tool-like environments.
         self.mask_head = nn.Linear(64, n_actions)
+        # Optional safety heads (per-action risk logits).
+        self.risk_violation_head = nn.Linear(64, n_actions)
+        self.risk_catastrophic_head = nn.Linear(64, n_actions)
 
     def forward(self, G_t: torch.Tensor):
         h = self.shared(G_t)
@@ -516,6 +519,17 @@ class Policy(nn.Module):
         logits = self.pi_head(h)
         mask_logits = self.mask_head(h)
         return logits, mask_logits
+
+    def forward_with_mask_and_risk(self, G_t: torch.Tensor):
+        """
+        Extended additive API: policy + mask logits + per-action risk logits.
+        """
+        h = self.shared(G_t)
+        logits = self.pi_head(h)
+        mask_logits = self.mask_head(h)
+        risk_violation_logits = self.risk_violation_head(h)
+        risk_catastrophic_logits = self.risk_catastrophic_head(h)
+        return logits, mask_logits, risk_violation_logits, risk_catastrophic_logits
 
 
 class HighLevelPolicy(nn.Module):

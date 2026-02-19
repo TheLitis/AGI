@@ -454,6 +454,14 @@ def run_experiment(
     action_mask_dropout_prob: float = 0.0,
     action_mask_prediction_coef: float = 0.10,
     repo_online_bc_coef: float = 0.10,
+    risk_head_coef: float = 0.10,
+    enable_risk_shield: bool = False,
+    risk_shield_threshold: float = 0.80,
+    use_constrained_rl: bool = False,
+    constraint_budget: float = 0.15,
+    catastrophic_budget: float = 0.05,
+    lagrangian_lr: float = 0.01,
+    lagrangian_max: float = 10.0,
     repo_bc_pretrain_episodes: int = 0,
     repo_bc_pretrain_max_steps: int = 24,
     stage1_steps: int = 5000,
@@ -535,6 +543,9 @@ def run_experiment(
         f"action_mask_dropout_prob={float(action_mask_dropout_prob):.3f}, "
         f"action_mask_pred_coef={float(action_mask_prediction_coef):.3f}, "
         f"repo_online_bc_coef={float(repo_online_bc_coef):.3f}, "
+        f"risk_head_coef={float(risk_head_coef):.3f}, "
+        f"risk_shield={bool(enable_risk_shield)}, risk_tau={float(risk_shield_threshold):.3f}, "
+        f"constrained_rl={bool(use_constrained_rl)}, "
         f"repo_bc_eps={int(max(0, repo_bc_pretrain_episodes))}, "
         f"device={device}, force_cpu={force_cpu_flag}"
     )
@@ -649,6 +660,14 @@ def run_experiment(
         action_mask_dropout_prob=float(action_mask_dropout_prob),
         action_mask_prediction_coef=float(action_mask_prediction_coef),
         repo_online_bc_coef=float(repo_online_bc_coef),
+        risk_head_coef=float(risk_head_coef),
+        enable_risk_shield=bool(enable_risk_shield),
+        risk_shield_threshold=float(risk_shield_threshold),
+        use_constrained_rl=bool(use_constrained_rl),
+        constraint_budget=float(constraint_budget),
+        catastrophic_budget=float(catastrophic_budget),
+        lagrangian_lr=float(lagrangian_lr),
+        lagrangian_max=float(lagrangian_max),
     )
 
     if resume_from:
@@ -1113,6 +1132,14 @@ def run_experiment(
             "action_mask_dropout_prob": float(action_mask_dropout_prob),
             "action_mask_prediction_coef": float(action_mask_prediction_coef),
             "repo_online_bc_coef": float(repo_online_bc_coef),
+            "risk_head_coef": float(risk_head_coef),
+            "enable_risk_shield": bool(enable_risk_shield),
+            "risk_shield_threshold": float(risk_shield_threshold),
+            "use_constrained_rl": bool(use_constrained_rl),
+            "constraint_budget": float(constraint_budget),
+            "catastrophic_budget": float(catastrophic_budget),
+            "lagrangian_lr": float(lagrangian_lr),
+            "lagrangian_max": float(lagrangian_max),
             "repo_bc_pretrain_episodes": int(max(0, repo_bc_pretrain_episodes)),
             "repo_bc_pretrain_max_steps": int(max(1, repo_bc_pretrain_max_steps)),
             "eval_max_steps": int(eval_max_steps),

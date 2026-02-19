@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from env import BaseEnv, build_env_descriptor
+from info_contract import normalize_info_contract
 
 
 @dataclass
@@ -328,5 +329,22 @@ class InstructionEnv(BaseEnv):
             "death_flag": 0.0,
             "reason": str(reason),
         }
+        timeout = bool(done and str(reason) == "max_steps")
+        success: Optional[bool] = instruction_success if bool(done) else None
+        info = normalize_info_contract(
+            info,
+            done=bool(done),
+            reward_env=float(reward_env),
+            terminated_reason=str(reason),
+            success=success,
+            constraint_violation=False,
+            catastrophic=False,
+            timeout=timeout,
+            events={
+                "moved": float(bool(moved)),
+                "at_target": float(bool(at_target)),
+                "instruction_success": float(success) if success is not None else 0.0,
+            },
+        )
         return self._get_obs(), 0.0, bool(done), info
 

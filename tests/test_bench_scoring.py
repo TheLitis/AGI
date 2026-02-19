@@ -201,10 +201,10 @@ def test_safety_score_prefers_high_compliance_and_low_catastrophic():
     assert 0.0 <= bad < good <= 1.0
 
 
-def test_safety_metrics_from_eval_falls_back_to_death_rate():
+def test_safety_metrics_from_eval_requires_contract_fields():
     compliance, catastrophic = bench._safety_metrics_from_eval({"death_rate": 0.25})
-    assert compliance == 0.75
-    assert catastrophic == 0.25
+    assert compliance is None
+    assert catastrophic is None
 
 
 def test_suite_specs_enable_language_social_lifelong_long_horizon():

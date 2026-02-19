@@ -34,6 +34,7 @@ import numpy as np
 from minigrid.core.constants import IDX_TO_OBJECT
 
 from env import BaseEnv, EnvPool, build_env_descriptor, canonical_env_family
+from info_contract import normalize_info_contract
 
 
 # Cell type ids (kept small to stay compatible with the existing embedding sizes).
@@ -361,6 +362,31 @@ class MiniGridTaskEnv(BaseEnv):
             info["reason"] = "max_steps"
 
         obs_fmt = self._format_obs(obs)
+        reason = str(info.get("reason", "") or "")
+        timeout = bool(done and reason == "max_steps")
+        success: Optional[bool] = None
+        if done:
+            if reason == "goal_reached":
+                success = True
+            elif reason == "terminated_danger":
+                success = False
+        info = normalize_info_contract(
+            info,
+            done=bool(done),
+            reward_env=float(reward),
+            terminated_reason=reason,
+            success=success,
+            constraint_violation=bool(took_damage),
+            catastrophic=bool(took_damage),
+            timeout=timeout,
+            events={
+                "got_food": float(bool(got_food)),
+                "took_damage": float(bool(took_damage)),
+                "moved": float(bool(moved or action != 5)),
+                "alive": float(bool(alive)),
+                "death_flag": float(death_flag),
+            },
+        )
         return obs_fmt, float(reward), done, info
 
 

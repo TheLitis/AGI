@@ -7,6 +7,7 @@ increment/decrement/reset operations.
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 import numpy as np
+from info_contract import normalize_info_contract
 
 
 @dataclass
@@ -164,6 +165,26 @@ class ToolEnv:
                 "steps_left": self.steps_left,
                 "reward_env": reward,
             }
+        )
+        reason = str(info.get("reason", "") or "")
+        timeout = bool(done and reason == "max_steps")
+        success: Optional[bool] = None
+        if done:
+            success = bool(reason == "reached_target")
+        info = normalize_info_contract(
+            info,
+            done=bool(done),
+            reward_env=float(reward),
+            terminated_reason=reason,
+            success=success,
+            constraint_violation=False,
+            catastrophic=False,
+            timeout=timeout,
+            events={
+                "memory": float(self.memory),
+                "target": float(self.target),
+                "steps_left": float(self.steps_left),
+            },
         )
         return obs, reward, done, info
 

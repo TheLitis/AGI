@@ -29,6 +29,7 @@ from agent import ProtoCreatureAgent
 from memory import ReplayBuffer, Transition
 from models import traits_to_preference_weights
 from text_utils import hash_text_to_ids
+from info_contract import normalize_info_contract
 from skills import (
     Skill,
     LatentSkill,
@@ -246,6 +247,14 @@ class Trainer:
         action_mask_dropout_prob: float = 0.0,
         action_mask_prediction_coef: float = 0.10,
         repo_online_bc_coef: float = 0.10,
+        risk_head_coef: float = 0.10,
+        enable_risk_shield: bool = False,
+        risk_shield_threshold: float = 0.80,
+        use_constrained_rl: bool = False,
+        constraint_budget: float = 0.15,
+        catastrophic_budget: float = 0.05,
+        lagrangian_lr: float = 0.01,
+        lagrangian_max: float = 10.0,
         train_env_ids: Optional[list] = None,
         test_env_ids: Optional[list] = None,
         env_descriptors: Optional[torch.Tensor] = None,
@@ -369,6 +378,20 @@ class Trainer:
         self.mask_pred_auc_ema = float("nan")
         self.mask_pred_auc_ema_decay = 0.95
         self.repo_online_bc_coef = max(0.0, float(repo_online_bc_coef or 0.0))
+        self.risk_head_coef = max(0.0, float(risk_head_coef or 0.0))
+        self.enable_risk_shield = bool(enable_risk_shield)
+        self.risk_shield_threshold = max(0.0, min(1.0, float(risk_shield_threshold)))
+        self.use_constrained_rl = bool(use_constrained_rl)
+        self.constraint_budget = max(0.0, min(1.0, float(constraint_budget)))
+        self.catastrophic_budget = max(0.0, min(1.0, float(catastrophic_budget)))
+        self.lagrangian_lr = max(0.0, float(lagrangian_lr))
+        self.lagrangian_max = max(0.0, float(lagrangian_max))
+        self.constraint_lambda = 0.0
+        self.catastrophic_lambda = 0.0
+        self.last_risk_shield_blocked_rate = 0.0
+        self.last_risk_max_prob = 0.0
+        self.last_constraint_event_rate = 0.0
+        self.last_catastrophic_event_rate = 0.0
         self._trait_safety_ctx: Dict[str, Dict[str, Any]] = {}
 
         descriptors = None
@@ -594,6 +617,100 @@ class Trainer:
             logits, mask_logits = policy.forward_with_mask(G_t)
             return logits, mask_logits
         return policy(G_t), None
+
+    def _policy_forward_with_aux(
+        self,
+        G_t: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """
+        Additive policy API:
+        - legacy: (logits, mask_logits)
+        - extended: (logits, mask_logits, risk_violation_logits, risk_catastrophic_logits)
+        """
+        policy = self.agent.policy
+        if hasattr(policy, "forward_with_mask_and_risk"):
+            logits, mask_logits, risk_v, risk_c = policy.forward_with_mask_and_risk(G_t)
+            return logits, mask_logits, risk_v, risk_c
+        logits, mask_logits = self._policy_forward_with_mask(G_t)
+        return logits, mask_logits, None, None
+
+    @staticmethod
+    def _update_lagrange_multiplier(
+        current_lambda: float,
+        observed_rate: float,
+        budget: float,
+        lr: float,
+        cap: float,
+    ) -> float:
+        """
+        Projected gradient ascent on the Lagrangian multiplier.
+        """
+        nxt = float(current_lambda) + float(lr) * (float(observed_rate) - float(budget))
+        nxt = max(0.0, min(float(cap), nxt))
+        return float(nxt)
+
+    def _apply_risk_shield(
+        self,
+        logits: torch.Tensor,
+        risk_catastrophic_logits: Optional[torch.Tensor],
+        hard_mask: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, int, float]:
+        """
+        Inference-time action shielding using catastrophic risk logits.
+        """
+        if not self.enable_risk_shield:
+            return logits, 0, 0.0
+        if risk_catastrophic_logits is None:
+            return logits, 0, 0.0
+        if risk_catastrophic_logits.shape != logits.shape:
+            return logits, 0, 0.0
+        probs = torch.sigmoid(risk_catastrophic_logits)
+        if probs.numel() <= 0:
+            return logits, 0, 0.0
+        unsafe = probs > float(self.risk_shield_threshold)
+        if hard_mask is not None and hard_mask.shape == unsafe.shape:
+            unsafe = unsafe & hard_mask
+        if not bool(torch.any(unsafe).item()):
+            mx = float(probs.max().item()) if probs.numel() > 0 else 0.0
+            return logits, 0, mx
+        safe = ~unsafe
+        if hard_mask is not None and hard_mask.shape == safe.shape:
+            safe = safe & hard_mask
+        if not bool(torch.any(safe).item()):
+            mx = float(probs.max().item()) if probs.numel() > 0 else 0.0
+            return logits, 0, mx
+        blocked = int(unsafe.sum().item())
+        shielded_logits = logits.masked_fill(unsafe, -1.0e9)
+        mx = float(probs.max().item()) if probs.numel() > 0 else 0.0
+        return shielded_logits, blocked, mx
+
+    @staticmethod
+    def _extract_contract_flags(info: Any, *, done: bool) -> Dict[str, Any]:
+        """
+        Canonicalize safety-relevant terminal flags from info contract.
+        """
+        if isinstance(info, dict):
+            norm = normalize_info_contract(
+                info,
+                done=bool(done),
+                reward_env=float(info.get("reward_env", 0.0) or 0.0),
+                terminated_reason=str(info.get("terminated_reason", info.get("reason", "")) or ""),
+                success=(info.get("success") if "success" in info else None),
+                constraint_violation=(bool(info.get("constraint_violation")) if "constraint_violation" in info else None),
+                catastrophic=(bool(info.get("catastrophic")) if "catastrophic" in info else None),
+                timeout=(bool(info.get("timeout")) if "timeout" in info else None),
+                events=(info.get("events") if isinstance(info.get("events"), dict) else None),
+            )
+        else:
+            norm = normalize_info_contract({}, done=bool(done), reward_env=0.0)
+        return {
+            "constraint_violation": bool(norm.get("constraint_violation", False)),
+            "catastrophic": bool(norm.get("catastrophic", False)),
+            "timeout": bool(norm.get("timeout", False)),
+            "terminated_reason": str(norm.get("terminated_reason", "")),
+            "success": norm.get("success"),
+            "normalized_info": norm,
+        }
 
     def _apply_predicted_mask_bias(
         self,
@@ -2671,6 +2788,14 @@ class Trainer:
         """
         if not isinstance(ep_info, dict):
             return None
+        if "success" in ep_info:
+            raw = ep_info.get("success")
+            if raw is None:
+                return None
+            if isinstance(raw, bool):
+                return raw
+            if isinstance(raw, (int, float)) and math.isfinite(float(raw)):
+                return bool(float(raw) >= 0.5)
         if "instruction_success" in ep_info:
             v = ep_info.get("instruction_success")
             if isinstance(v, bool):
@@ -4686,10 +4811,18 @@ class Trainer:
         mask_targets_list: List[torch.Tensor] = []
         online_bc_logits_list: List[torch.Tensor] = []
         online_bc_targets_list: List[torch.Tensor] = []
+        risk_violation_logits_list: List[torch.Tensor] = []
+        risk_catastrophic_logits_list: List[torch.Tensor] = []
+        risk_violation_targets_list: List[torch.Tensor] = []
+        risk_catastrophic_targets_list: List[torch.Tensor] = []
         online_bc_enabled = float(getattr(self, "repo_online_bc_coef", 0.0) or 0.0) > 0.0
 
         step_idx = 0
         planner_used_steps = 0
+        risk_shield_blocked_steps = 0
+        risk_max_probs: List[float] = []
+        constraint_events = 0
+        catastrophic_events = 0
         planner_alpha_vals: List[float] = []
         planner_js_vals: List[float] = []
         planner_margin_vals: List[float] = []
@@ -4816,6 +4949,8 @@ class Trainer:
                 M,
             )
             logits_for_online_bc: Optional[torch.Tensor] = None
+            selected_risk_violation_logit: Optional[torch.Tensor] = None
+            selected_risk_catastrophic_logit: Optional[torch.Tensor] = None
 
             if self.use_skills and self.agent.high_level_policy is not None and self._total_skill_count() > 0:
                 action, logprob, entropy, skill_state = self._select_action_with_skills(
@@ -4832,7 +4967,7 @@ class Trainer:
                 )
                 # fallback to primitive policy if skill selection failed
                 if action is None:
-                    logits_raw, mask_logits_pred = self._policy_forward_with_mask(G_t)
+                    logits_raw, mask_logits_pred, risk_v_logits, risk_c_logits = self._policy_forward_with_aux(G_t)
                     logits_for_online_bc = logits_raw
                     mask = self._get_action_mask_for_logits(logits_raw)
                     has_invalid = bool(mask is not None and bool(torch.any(~mask).item()))
@@ -4846,13 +4981,22 @@ class Trainer:
                         invalid_action_mass = torch.zeros(
                             logits_raw.shape[0], device=logits_raw.device, dtype=torch.float32
                         )
+                    logits_shielded, blocked_count, max_prob = self._apply_risk_shield(
+                        logits_raw,
+                        risk_c_logits,
+                        hard_mask=mask,
+                    )
+                    if blocked_count > 0:
+                        risk_shield_blocked_steps += 1
+                    if max_prob > 0.0:
+                        risk_max_probs.append(float(max_prob))
                     apply_mask = True
                     dropout_p = float(getattr(self, "action_mask_dropout_prob", 0.0) or 0.0)
                     if dropout_p > 0.0 and has_invalid:
-                        if torch.rand((), device=logits_raw.device).item() < dropout_p:
+                        if torch.rand((), device=logits_shielded.device).item() < dropout_p:
                             apply_mask = False
                     logits = self._compose_policy_logits_with_masks(
-                        logits_raw,
+                        logits_shielded,
                         mask,
                         mask_logits_pred,
                         apply_hard_mask=bool(apply_mask),
@@ -4861,8 +5005,12 @@ class Trainer:
                     action = dist.sample()
                     logprob = dist.log_prob(action)
                     entropy = dist.entropy()
+                    if risk_v_logits is not None and risk_c_logits is not None:
+                        gather_idx = action.view(-1, 1)
+                        selected_risk_violation_logit = risk_v_logits.gather(1, gather_idx).view(-1)
+                        selected_risk_catastrophic_logit = risk_c_logits.gather(1, gather_idx).view(-1)
             else:
-                logits_raw, mask_logits_pred = self._policy_forward_with_mask(G_t)  # (1, n_actions)
+                logits_raw, mask_logits_pred, risk_v_logits, risk_c_logits = self._policy_forward_with_aux(G_t)  # (1, n_actions)
 
                 # ---- planner (????????????? _get_planner_logits) ----
                 if planning_coef > 0.0:
@@ -4902,13 +5050,22 @@ class Trainer:
                     invalid_action_mass = torch.zeros(
                         logits_raw.shape[0], device=logits_raw.device, dtype=torch.float32
                     )
+                logits_shielded, blocked_count, max_prob = self._apply_risk_shield(
+                    logits_raw,
+                    risk_c_logits,
+                    hard_mask=mask,
+                )
+                if blocked_count > 0:
+                    risk_shield_blocked_steps += 1
+                if max_prob > 0.0:
+                    risk_max_probs.append(float(max_prob))
                 apply_mask = True
                 dropout_p = float(getattr(self, "action_mask_dropout_prob", 0.0) or 0.0)
                 if dropout_p > 0.0 and has_invalid:
-                    if torch.rand((), device=logits_raw.device).item() < dropout_p:
+                    if torch.rand((), device=logits_shielded.device).item() < dropout_p:
                         apply_mask = False
                 logits = self._compose_policy_logits_with_masks(
-                    logits_raw,
+                    logits_shielded,
                     mask,
                     mask_logits_pred,
                     apply_hard_mask=bool(apply_mask),
@@ -4917,6 +5074,10 @@ class Trainer:
                 action = dist.sample()
                 logprob = dist.log_prob(action)
                 entropy = dist.entropy()
+                if risk_v_logits is not None and risk_c_logits is not None:
+                    gather_idx = action.view(-1, 1)
+                    selected_risk_violation_logit = risk_v_logits.gather(1, gather_idx).view(-1)
+                    selected_risk_catastrophic_logit = risk_c_logits.gather(1, gather_idx).view(-1)
 
             if online_bc_enabled and logits_for_online_bc is not None:
                 expert_action = self._get_repo_expert_action()
@@ -4936,6 +5097,8 @@ class Trainer:
             )
 
             next_obs, _, done, info = self.env.step(action.item())
+            flags = self._extract_contract_flags(info, done=bool(done))
+            info = flags["normalized_info"]
             reward_env = self.compute_preference_reward(info)
             death_flag = float(info.get("death_flag", 0.0))
 
@@ -4974,6 +5137,13 @@ class Trainer:
                 cur_r = 0.0
 
             reward_total = reward_env + cur_r
+            violation_flag = 1.0 if bool(flags.get("constraint_violation", False)) else 0.0
+            catastrophic_flag = 1.0 if bool(flags.get("catastrophic", False)) else 0.0
+            constraint_events += int(violation_flag > 0.5)
+            catastrophic_events += int(catastrophic_flag > 0.5)
+            if self.use_constrained_rl:
+                reward_total -= float(self.constraint_lambda) * float(violation_flag)
+                reward_total -= float(self.catastrophic_lambda) * float(catastrophic_flag)
 
             # Log for RL.
             actions_buf[step_idx] = action
@@ -4985,6 +5155,18 @@ class Trainer:
             conflicts_list.append(conf_t.view(-1))
             uncertainties_list.append(U_t.view(-1))
             invalid_action_mass_list.append(invalid_action_mass.view(-1))
+            if (
+                selected_risk_violation_logit is not None
+                and selected_risk_catastrophic_logit is not None
+            ):
+                risk_violation_logits_list.append(selected_risk_violation_logit.view(-1))
+                risk_catastrophic_logits_list.append(selected_risk_catastrophic_logit.view(-1))
+                risk_violation_targets_list.append(
+                    torch.tensor([float(violation_flag)], dtype=selected_risk_violation_logit.dtype, device=self.device)
+                )
+                risk_catastrophic_targets_list.append(
+                    torch.tensor([float(catastrophic_flag)], dtype=selected_risk_catastrophic_logit.dtype, device=self.device)
+                )
 
             got_food = 1.0 if info.get("got_food", False) else 0.0
             took_damage = 1.0 if info.get("took_damage", False) else 0.0
@@ -5059,6 +5241,18 @@ class Trainer:
         online_bc_targets_t: Optional[torch.Tensor] = (
             torch.cat(online_bc_targets_list, dim=0) if online_bc_targets_list else None
         )
+        risk_violation_logits_t: Optional[torch.Tensor] = (
+            torch.cat(risk_violation_logits_list, dim=0) if risk_violation_logits_list else None
+        )
+        risk_catastrophic_logits_t: Optional[torch.Tensor] = (
+            torch.cat(risk_catastrophic_logits_list, dim=0) if risk_catastrophic_logits_list else None
+        )
+        risk_violation_targets_t: Optional[torch.Tensor] = (
+            torch.cat(risk_violation_targets_list, dim=0) if risk_violation_targets_list else None
+        )
+        risk_catastrophic_targets_t: Optional[torch.Tensor] = (
+            torch.cat(risk_catastrophic_targets_list, dim=0) if risk_catastrophic_targets_list else None
+        )
 
         # logging/diagnostics (planner usage)
         self.last_planner_usage_steps = int(planner_used_steps)
@@ -5070,6 +5264,10 @@ class Trainer:
             margin_values=planner_margin_vals,
             override_values=planner_override_vals,
         )
+        self.last_risk_shield_blocked_rate = float(risk_shield_blocked_steps) / float(max(1, step_idx))
+        self.last_risk_max_prob = float(np.mean(risk_max_probs)) if risk_max_probs else 0.0
+        self.last_constraint_event_rate = float(constraint_events) / float(max(1, step_idx))
+        self.last_catastrophic_event_rate = float(catastrophic_events) / float(max(1, step_idx))
 
         return (
             actions_t,
@@ -5085,6 +5283,10 @@ class Trainer:
             mask_targets_t,
             online_bc_logits_t,
             online_bc_targets_t,
+            risk_violation_logits_t,
+            risk_catastrophic_logits_t,
+            risk_violation_targets_t,
+            risk_catastrophic_targets_t,
         )
 
     # =========================
@@ -5253,6 +5455,10 @@ class Trainer:
         mask_targets: Optional[torch.Tensor] = None,
         online_bc_logits: Optional[torch.Tensor] = None,
         online_bc_targets: Optional[torch.Tensor] = None,
+        risk_violation_logits: Optional[torch.Tensor] = None,
+        risk_catastrophic_logits: Optional[torch.Tensor] = None,
+        risk_violation_targets: Optional[torch.Tensor] = None,
+        risk_catastrophic_targets: Optional[torch.Tensor] = None,
         regularization_coef: float = 0.0,
         optimizer: Optional[torch.optim.Optimizer] = None,
     ) -> Dict[str, float]:
@@ -5368,6 +5574,31 @@ class Trainer:
             online_bc_samples = float(targets_long.numel())
             online_bc_loss = F.cross_entropy(online_bc_logits, targets_long)
             loss = loss + online_bc_coef * online_bc_loss
+
+        risk_head_coef = float(getattr(self, "risk_head_coef", 0.0) or 0.0)
+        risk_loss = torch.tensor(0.0, device=self.device, dtype=loss.dtype)
+        if (
+            risk_head_coef > 0.0
+            and risk_violation_logits is not None
+            and risk_catastrophic_logits is not None
+            and risk_violation_targets is not None
+            and risk_catastrophic_targets is not None
+            and risk_violation_logits.numel() > 0
+            and risk_catastrophic_logits.numel() > 0
+            and risk_violation_targets.numel() > 0
+            and risk_catastrophic_targets.numel() > 0
+        ):
+            rv_logits = risk_violation_logits.view(-1)
+            rc_logits = risk_catastrophic_logits.view(-1)
+            rv_targets = risk_violation_targets.to(rv_logits.dtype).view(-1)
+            rc_targets = risk_catastrophic_targets.to(rc_logits.dtype).view(-1)
+            rv_n = min(rv_logits.numel(), rv_targets.numel())
+            rc_n = min(rc_logits.numel(), rc_targets.numel())
+            if rv_n > 0 and rc_n > 0:
+                rv_loss = F.binary_cross_entropy_with_logits(rv_logits[:rv_n], rv_targets[:rv_n])
+                rc_loss = F.binary_cross_entropy_with_logits(rc_logits[:rc_n], rc_targets[:rc_n])
+                risk_loss = rv_loss + rc_loss
+                loss = loss + risk_head_coef * risk_loss
         if regularization_coef > 0.0:
             loss = loss + self._fast_param_l2_penalty(regularization_coef)
 
@@ -5398,6 +5629,8 @@ class Trainer:
             "online_bc_coef": float(online_bc_coef),
             "online_bc_loss": float(online_bc_loss.detach().item()),
             "online_bc_samples": float(online_bc_samples),
+            "risk_head_coef": float(risk_head_coef),
+            "risk_loss": float(risk_loss.detach().item()),
         }
 
     def train_repo_policy_bc(
@@ -5615,6 +5848,10 @@ class Trainer:
             mask_targets,
             online_bc_logits,
             online_bc_targets,
+            risk_violation_logits,
+            risk_catastrophic_logits,
+            risk_violation_targets,
+            risk_catastrophic_targets,
         ) = self.collect_onpolicy_experience(
             n_steps=n_steps,
             use_self=use_self,
@@ -5637,12 +5874,48 @@ class Trainer:
             mask_targets=mask_targets,
             online_bc_logits=online_bc_logits,
             online_bc_targets=online_bc_targets,
+            risk_violation_logits=risk_violation_logits,
+            risk_catastrophic_logits=risk_catastrophic_logits,
+            risk_violation_targets=risk_violation_targets,
+            risk_catastrophic_targets=risk_catastrophic_targets,
             gamma=gamma,
             entropy_coef=entropy_coef,
             beta_conflict=beta_conflict,
             beta_uncertainty=beta_uncertainty,
             regularization_coef=0.0,
         )
+
+        if self.use_constrained_rl:
+            violation_rate = (
+                float(risk_violation_targets.mean().item())
+                if risk_violation_targets is not None and risk_violation_targets.numel() > 0
+                else float(getattr(self, "last_constraint_event_rate", 0.0))
+            )
+            catastrophic_rate = (
+                float(risk_catastrophic_targets.mean().item())
+                if risk_catastrophic_targets is not None and risk_catastrophic_targets.numel() > 0
+                else float(getattr(self, "last_catastrophic_event_rate", 0.0))
+            )
+            self.constraint_lambda = self._update_lagrange_multiplier(
+                self.constraint_lambda,
+                violation_rate,
+                self.constraint_budget,
+                self.lagrangian_lr,
+                self.lagrangian_max,
+            )
+            self.catastrophic_lambda = self._update_lagrange_multiplier(
+                self.catastrophic_lambda,
+                catastrophic_rate,
+                self.catastrophic_budget,
+                self.lagrangian_lr,
+                self.lagrangian_max,
+            )
+            stats["constraint_lambda"] = float(self.constraint_lambda)
+            stats["catastrophic_lambda"] = float(self.catastrophic_lambda)
+            stats["constraint_rate"] = float(violation_rate)
+            stats["catastrophic_rate"] = float(catastrophic_rate)
+        stats["risk_shield_blocked_rate"] = float(getattr(self, "last_risk_shield_blocked_rate", 0.0))
+        stats["risk_max_prob"] = float(getattr(self, "last_risk_max_prob", 0.0))
 
         self.update_memory_from_buffer(
             batch_size=32,
@@ -6601,6 +6874,7 @@ class Trainer:
                 episode_had_death = False
                 episode_had_violation = False
                 episode_had_catastrophic = False
+                episode_had_timeout = False
                 unc_episode = 0.0
                 unc_steps = 0
                 env_desc_np = None
@@ -6704,8 +6978,13 @@ class Trainer:
                                 W_t=W_t,
                             )
                             if action is None:
-                                logits_raw, mask_logits_pred = self._policy_forward_with_mask(G_t)
+                                logits_raw, mask_logits_pred, _risk_v_logits, risk_c_logits = self._policy_forward_with_aux(G_t)
                                 mask = self._get_action_mask_for_logits(logits_raw)
+                                logits_raw, _blocked_count, _max_risk = self._apply_risk_shield(
+                                    logits_raw,
+                                    risk_c_logits,
+                                    hard_mask=mask,
+                                )
                                 logits = self._compose_policy_logits_with_masks(
                                     logits_raw,
                                     mask,
@@ -6714,7 +6993,7 @@ class Trainer:
                                 dist = Categorical(logits=logits)
                                 action = dist.sample()
                         else:
-                            logits_raw, mask_logits_pred = self._policy_forward_with_mask(G_t)
+                            logits_raw, mask_logits_pred, _risk_v_logits, risk_c_logits = self._policy_forward_with_aux(G_t)
                             logits = logits_raw
                             policy_logits_for_diag = logits_raw.detach()
                             planner_logits_for_diag: Optional[torch.Tensor] = None
@@ -6742,6 +7021,11 @@ class Trainer:
                                 planner_override_vals.append(float(planner_debug.get("planner_override", 0.0)))
 
                             mask = self._get_action_mask_for_logits(logits)
+                            logits, _blocked_count, _max_risk = self._apply_risk_shield(
+                                logits,
+                                risk_c_logits,
+                                hard_mask=mask,
+                            )
                             logits = self._compose_policy_logits_with_masks(
                                 logits,
                                 mask,
@@ -6778,6 +7062,8 @@ class Trainer:
                                     )
 
                     next_obs, _, done, info = self.env.step(action.item())
+                    flags = self._extract_contract_flags(info, done=bool(done))
+                    info = flags["normalized_info"]
                     reward_env = self.compute_preference_reward(info)
                     episode_rewards.append(float(reward_env))
                     if (
@@ -6803,7 +7089,6 @@ class Trainer:
                     if info.get("took_damage", False):
                         damage_count += 1
                         episode_had_damage = True
-                        episode_had_violation = True
 
                     death_flag_raw = info.get("death_flag")
                     if isinstance(death_flag_raw, (int, float)) and float(death_flag_raw) > 0.0:
@@ -6816,6 +7101,13 @@ class Trainer:
                     elif isinstance(alive_raw, (int, float)):
                         if float(alive_raw) <= 0.0:
                             episode_had_death = True
+
+                    if bool(flags.get("constraint_violation", False)):
+                        episode_had_violation = True
+                    if bool(flags.get("catastrophic", False)):
+                        episode_had_catastrophic = True
+                    if bool(flags.get("timeout", False)):
+                        episode_had_timeout = True
 
                     patch = next_obs["patch"]
                     energy = next_obs["energy"]
@@ -6845,7 +7137,7 @@ class Trainer:
                     last_action = action
 
                 if not done and t >= max_steps:
-                    timeout_episodes += 1
+                    episode_had_timeout = True
 
                 episode_nstep_returns = self._discounted_nstep_returns(
                     episode_rewards,
@@ -6868,13 +7160,9 @@ class Trainer:
 
                 reason_raw = ""
                 if isinstance(info, dict):
-                    reason_raw = str(info.get("reason", "") or "").strip()
-                    if not reason_raw:
-                        status_raw = str(info.get("status", "") or "").strip().lower()
-                        if status_raw == "timeout":
-                            reason_raw = "pytest_timeout"
+                    reason_raw = str(info.get("terminated_reason", info.get("reason", "")) or "").strip()
                 if not reason_raw:
-                    if not done and t >= max_steps:
+                    if episode_had_timeout:
                         reason_raw = "eval_max_steps_cap"
                     elif done:
                         reason_raw = "done"
@@ -6883,11 +7171,10 @@ class Trainer:
                 reason_counts[reason_raw] = reason_counts.get(reason_raw, 0) + 1
 
                 reason_norm = reason_raw.lower()
-                if reason_norm in {"terminated_danger", "pytest_timeout"}:
-                    episode_had_violation = True
+                if episode_had_death and episode_had_damage and not episode_had_catastrophic:
                     episode_had_catastrophic = True
-                if episode_had_death and episode_had_damage:
-                    episode_had_catastrophic = True
+                if episode_had_timeout:
+                    timeout_episodes += 1
 
                 if episode_had_damage:
                     damage_episodes += 1

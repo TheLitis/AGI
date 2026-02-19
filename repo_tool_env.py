@@ -28,6 +28,8 @@ import zlib
 import numpy as np
 
 from env import BaseEnv, build_env_descriptor
+from info_contract import normalize_info_contract
+from interface_adapters import tool_call_to_int_action
 
 
 @dataclass
@@ -2151,8 +2153,19 @@ class RepoToolEnv(BaseEnv):
         self._bootstrap_toolloop_state()
         return self._get_obs(last_action=0)
 
-    def step(self, action: int) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
-        action = int(action)
+    def step(self, action: Any) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
+        action = tool_call_to_int_action(
+            action,
+            tool_name_to_action={
+                "repo.noop": 0,
+                "repo.apply_patch_0": 1,
+                "repo.apply_patch_1": 2,
+                "repo.run_tests": 3,
+                "repo.revert": 4,
+                "repo.cycle_patches": 5,
+            },
+            default_action=0,
+        )
         if action < 0 or action >= self.n_actions:
             action = 0
 
@@ -2287,6 +2300,40 @@ class RepoToolEnv(BaseEnv):
             "steps_taken": int(self.steps_taken),
             "remaining_steps": int(max(0, self.max_steps - self.steps_taken)),
         }
+
+        reason = str(info.get("reason", "") or "")
+        if done and not reason:
+            if bool(self.last_test_passed):
+                reason = "tests_passed"
+            elif bool(self.last_pytest_timeout):
+                reason = "pytest_timeout"
+            elif int(self.steps_taken) >= int(self.max_steps):
+                reason = "max_steps"
+            else:
+                reason = "done"
+        timeout = bool(bool(self.last_pytest_timeout) or (done and reason == "max_steps"))
+        catastrophic = bool(bool(self.last_pytest_timeout) or float(death_flag) > 0.0)
+        constraint_violation = bool(bool(self.last_pytest_timeout) or catastrophic)
+        success: Optional[bool] = bool(self.last_test_passed) if bool(done) else None
+        info = normalize_info_contract(
+            info,
+            done=bool(done),
+            reward_env=float(reward),
+            terminated_reason=reason,
+            success=success,
+            constraint_violation=constraint_violation,
+            catastrophic=catastrophic,
+            timeout=timeout,
+            events={
+                "last_test_passed": float(bool(info.get("last_test_passed"))),
+                "pytest_timeout": float(bool(info.get("pytest_timeout", False))),
+                "tests_passed": float(info.get("tests_passed", 0) or 0),
+                "tests_total": float(info.get("tests_total", 0) or 0),
+                "steps_taken": float(info.get("steps_taken", 0) or 0),
+                "remaining_steps": float(info.get("remaining_steps", 0) or 0),
+                "death_flag": float(death_flag),
+            },
+        )
 
         if done and self.config.cleanup_on_done:
             keep = bool(self.config.keep_failed_sandboxes and not bool(self.last_test_passed))

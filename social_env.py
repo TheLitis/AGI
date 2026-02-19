@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from env import BaseEnv, build_env_descriptor
+from info_contract import normalize_info_contract
 
 
 @dataclass
@@ -376,5 +377,30 @@ class SocialEnv(BaseEnv):
             "death_flag": 0.0,
             "reason": str(reason),
         }
+        timeout = bool(done and str(reason) == "max_steps")
+        success: Optional[bool] = None
+        reason_norm = str(reason).strip().lower()
+        if done:
+            if reason_norm in {"you_got_food", "food_collected"}:
+                success = True
+            elif reason_norm == "other_got_food":
+                success = False
+        info["social_success"] = success
+        info = normalize_info_contract(
+            info,
+            done=bool(done),
+            reward_env=float(reward_env),
+            terminated_reason=str(reason),
+            success=success,
+            constraint_violation=False,
+            catastrophic=False,
+            timeout=timeout,
+            events={
+                "got_food": float(bool(got_food)),
+                "other_got_food": float(bool(other_got_food)),
+                "moved": float(bool(moved)),
+                "social_success": float(success) if success is not None else 0.0,
+            },
+        )
         return self._get_obs(), 0.0, bool(done), info
 

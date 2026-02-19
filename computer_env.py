@@ -12,6 +12,7 @@ import copy
 import numpy as np
 
 from env import BaseEnv, build_env_descriptor
+from info_contract import normalize_info_contract
 
 
 @dataclass
@@ -240,6 +241,7 @@ class ComputerEnv(BaseEnv):
             "scenario_name": self.current_scenario_name,
             "env_id": self.env_id,
             "env_name": self.env_name,
+            "env_family": self.env_family,
             "alive": True,
             "death_flag": 0.0,
             "description": self.current_task.description or self.description,
@@ -267,6 +269,22 @@ class ComputerEnv(BaseEnv):
         elif action == 5:  # SWITCH_TASK
             self._switch_task()
             obs = self._get_obs()
+            info = normalize_info_contract(
+                info,
+                done=False,
+                reward_env=float(reward),
+                terminated_reason="switched_task",
+                success=None,
+                constraint_violation=False,
+                catastrophic=False,
+                timeout=False,
+                events={
+                    "tests_passed": float(obs.get("tests_passed", 0) or 0),
+                    "tests_total": float(obs.get("tests_total", 0) or 0),
+                    "steps_taken": float(obs.get("steps_taken", 0) or 0),
+                    "remaining_steps": float(obs.get("remaining_steps", 0) or 0),
+                },
+            )
             return obs, reward, False, info
         # NO_OP just incurs step penalty
 
@@ -284,6 +302,34 @@ class ComputerEnv(BaseEnv):
         info["tests_total"] = obs["tests_total"]
         info["steps_taken"] = obs["steps_taken"]
         info["remaining_steps"] = obs["remaining_steps"]
+        reason = ""
+        success: Optional[bool] = None
+        timeout = False
+        if done:
+            if self.state.tests_passed >= self.state.tests_total:
+                reason = "tests_passed"
+                success = True
+            else:
+                reason = "max_steps"
+                success = False
+                timeout = True
+        info = normalize_info_contract(
+            info,
+            done=bool(done),
+            reward_env=float(reward),
+            terminated_reason=reason,
+            success=success,
+            constraint_violation=False,
+            catastrophic=False,
+            timeout=timeout,
+            events={
+                "tests_passed": float(obs.get("tests_passed", 0) or 0),
+                "tests_total": float(obs.get("tests_total", 0) or 0),
+                "steps_taken": float(obs.get("steps_taken", 0) or 0),
+                "remaining_steps": float(obs.get("remaining_steps", 0) or 0),
+                "last_test_passed": float(bool(info.get("last_test_passed", False))),
+            },
+        )
         return obs, reward, done, info
 
     def get_obs_spec(self) -> Dict[str, Any]:

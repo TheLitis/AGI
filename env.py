@@ -1,4 +1,4 @@
-"""
+﻿"""
 Environments for the proto-creature project.
 
 - `GridWorldEnv`: small 2D gridworld with food/danger/home cells, optional
@@ -12,6 +12,7 @@ PEP8 cleanup only.
 
 import numpy as np
 from typing import List, Tuple, Dict, Any, Optional, Iterable
+from info_contract import normalize_info_contract
 
 # Lightweight registry to keep env-family ids stable across backends.
 ENV_FAMILY_IDS = {
@@ -583,6 +584,33 @@ class GridWorldEnv(BaseEnv):
 
         obs = self._get_obs()
         reward = 0.0  # вся настоящая награда считается в Trainer по traits
+        reason = str(info.get("reason", "") or "")
+        timeout = bool(done and reason == "max_steps")
+        catastrophic = bool(float(info.get("death_flag", 0.0) or 0.0) > 0.0)
+        constraint_violation = bool(info.get("took_damage", False) or catastrophic)
+        success: Optional[bool] = None
+        if done:
+            if reason == "energy_depleted":
+                success = False
+            elif reason == "max_steps":
+                success = True
+        info = normalize_info_contract(
+            info,
+            done=bool(done),
+            reward_env=float(reward),
+            terminated_reason=reason,
+            success=success,
+            constraint_violation=constraint_violation,
+            catastrophic=catastrophic,
+            timeout=timeout,
+            events={
+                "got_food": float(bool(info.get("got_food", False))),
+                "took_damage": float(bool(info.get("took_damage", False))),
+                "moved": float(bool(info.get("moved", False))),
+                "alive": float(bool(info.get("alive", True))),
+                "death_flag": float(info.get("death_flag", 0.0) or 0.0),
+            },
+        )
         return obs, reward, done, info
 
 
@@ -805,6 +833,17 @@ class EnvPool(BaseEnv):
             info["scenario_id"] = obs["scenario_id"]
         if "scenario_name" not in info and "scenario_name" in obs:
             info["scenario_name"] = obs["scenario_name"]
+        info = normalize_info_contract(
+            info,
+            done=bool(done),
+            reward_env=float(info.get("reward_env", reward)),
+            terminated_reason=str(info.get("terminated_reason", info.get("reason", "")) or ""),
+            success=(info.get("success") if "success" in info else None),
+            constraint_violation=(bool(info.get("constraint_violation")) if "constraint_violation" in info else None),
+            catastrophic=(bool(info.get("catastrophic")) if "catastrophic" in info else None),
+            timeout=(bool(info.get("timeout")) if "timeout" in info else None),
+            events=(info.get("events") if isinstance(info.get("events"), dict) else None),
+        )
         return obs, reward, done, info
 
     def sample_random_action(self) -> int:
