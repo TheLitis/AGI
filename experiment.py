@@ -452,6 +452,7 @@ def run_experiment(
     safety_penalty_coef: float = 1.0,
     action_mask_internalization_coef: float = 0.10,
     action_mask_dropout_prob: float = 0.0,
+    action_mask_dropout_warmup_updates: int = 0,
     action_mask_prediction_coef: float = 0.10,
     repo_online_bc_coef: float = 0.10,
     risk_head_coef: float = 0.10,
@@ -541,6 +542,7 @@ def run_experiment(
         f"beta_conflict={beta_conflict:.3f}, beta_uncertainty={beta_uncertainty:.3f}, "
         f"invalid_action_coef={action_mask_internalization_coef:.3f}, "
         f"action_mask_dropout_prob={float(action_mask_dropout_prob):.3f}, "
+        f"action_mask_dropout_warmup_updates={int(max(0, action_mask_dropout_warmup_updates))}, "
         f"action_mask_pred_coef={float(action_mask_prediction_coef):.3f}, "
         f"repo_online_bc_coef={float(repo_online_bc_coef):.3f}, "
         f"risk_head_coef={float(risk_head_coef):.3f}, "
@@ -658,6 +660,7 @@ def run_experiment(
         n_latent_skills=n_latent_skills,
         action_mask_internalization_coef=action_mask_internalization_coef,
         action_mask_dropout_prob=float(action_mask_dropout_prob),
+        action_mask_dropout_warmup_updates=int(max(0, action_mask_dropout_warmup_updates)),
         action_mask_prediction_coef=float(action_mask_prediction_coef),
         repo_online_bc_coef=float(repo_online_bc_coef),
         risk_head_coef=float(risk_head_coef),
@@ -1130,6 +1133,7 @@ def run_experiment(
             "planning_coef": planning_coef,
             "action_mask_internalization_coef": action_mask_internalization_coef,
             "action_mask_dropout_prob": float(action_mask_dropout_prob),
+            "action_mask_dropout_warmup_updates": int(max(0, action_mask_dropout_warmup_updates)),
             "action_mask_prediction_coef": float(action_mask_prediction_coef),
             "repo_online_bc_coef": float(repo_online_bc_coef),
             "risk_head_coef": float(risk_head_coef),

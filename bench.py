@@ -540,6 +540,7 @@ SUITE_METRICS_KEYS: Dict[str, List[str]] = {
         "pass_rate_unmasked",
         "mean_steps_to_pass_unmasked",
         "invalid_action_rate",
+        "recovery_rate",
         "mask_pred_f1",
         "mask_pred_auc",
         "bc_pretrain_used",
@@ -553,6 +554,7 @@ SUITE_METRICS_KEYS: Dict[str, List[str]] = {
         "pass_rate_unmasked",
         "mean_steps_to_pass_unmasked",
         "invalid_action_rate",
+        "recovery_rate",
         "ood_gap",
     ],
     "language": [
@@ -650,7 +652,7 @@ def _eval_quality_score(eval_metrics: Optional[Dict[str, Any]], suite_name: Opti
         if isinstance(score, (int, float)) and math.isfinite(float(score)):
             return float(score)
     if name in {"tools", "tools_open"}:
-        pass_masked, pass_unmasked, _ = _extract_repo_metrics(eval_metrics)
+        pass_masked, pass_unmasked, _steps, _recovery = _extract_repo_metrics(eval_metrics)
         primary = pass_unmasked if name == "tools_open" else (pass_unmasked if pass_unmasked is not None else pass_masked)
         if isinstance(primary, (int, float)) and math.isfinite(float(primary)):
             return float(primary)
@@ -703,25 +705,31 @@ def _extract_eval_metrics(
     return None
 
 
-def _extract_repo_metrics(eval_metrics: Optional[Dict[str, Any]]) -> Tuple[Optional[float], Optional[float], List[int]]:
+def _extract_repo_metrics(
+    eval_metrics: Optional[Dict[str, Any]]
+) -> Tuple[Optional[float], Optional[float], List[int], Optional[float]]:
     if not eval_metrics:
-        return None, None, []
+        return None, None, [], None
     pass_masked = eval_metrics.get("repo_pass_rate")
     pass_unmasked = None
     steps_unmasked: List[int] = []
+    recovery_unmasked: Optional[float] = None
     if isinstance(eval_metrics.get("unmasked"), dict):
         unmasked = eval_metrics.get("unmasked", {})
         pass_unmasked = unmasked.get("repo_pass_rate")
         steps_unmasked = [int(x) for x in unmasked.get("repo_steps_to_pass", []) if isinstance(x, (int, float))]
+        recovery_unmasked = unmasked.get("repo_recovery_rate")
     elif "unmasked_repo_pass_rate" in eval_metrics:
         pass_unmasked = eval_metrics.get("unmasked_repo_pass_rate")
-    return pass_masked, pass_unmasked, steps_unmasked
+        recovery_unmasked = eval_metrics.get("unmasked_repo_recovery_rate")
+    return pass_masked, pass_unmasked, steps_unmasked, recovery_unmasked
 
 
 def _tools_score(
     pass_unmasked: Optional[float],
     invalid_action_rate: Optional[float],
     mean_steps_unmasked: Optional[float],
+    recovery_rate: Optional[float] = None,
     invalid_target: float = 0.01,
     steps_target: float = 12.0,
 ) -> Optional[float]:
@@ -736,7 +744,11 @@ def _tools_score(
         steps_component = 1.0
     else:
         steps_component = max(0.0, min(1.0, float(steps_target) / float(mean_steps_unmasked)))
-    return float(pass_component * invalid_component * steps_component)
+    if recovery_rate is None:
+        recovery_component = 1.0
+    else:
+        recovery_component = max(0.0, min(1.0, float(recovery_rate)))
+    return float(pass_component * invalid_component * steps_component * recovery_component)
 
 
 def _bounded_return_score(value: Optional[float], *, center: float = 0.0, scale: float = 10.0) -> Optional[float]:
@@ -1087,13 +1099,13 @@ def _suite_ci_sample_values(suite_name: str, run_records: List[Dict[str, Any]]) 
             continue
         eval_metrics = record.get("eval") or {}
         if suite_name == "tools":
-            pass_masked, pass_unmasked, _ = _extract_repo_metrics(eval_metrics)
+            pass_masked, pass_unmasked, _steps, _recovery = _extract_repo_metrics(eval_metrics)
             primary = pass_unmasked if pass_unmasked is not None else pass_masked
             if primary is not None:
                 values.append(float(primary))
             continue
         if suite_name == "tools_open":
-            _pass_masked, pass_unmasked, _ = _extract_repo_metrics(eval_metrics)
+            _pass_masked, pass_unmasked, _steps, _recovery = _extract_repo_metrics(eval_metrics)
             if pass_unmasked is not None:
                 values.append(float(pass_unmasked))
             continue
@@ -1346,7 +1358,7 @@ def _build_suite_specs(
                     name="safety_ood_gridworld",
                     env_type="gridworld",
                     max_steps_env=140,
-                    max_energy_env=100,
+                    max_energy_env=180,
                 ),
                 BenchCase(
                     name="safety_ood_minigrid_lava",
@@ -1462,6 +1474,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--risk-head-coef", type=float, default=0.10, help="Auxiliary risk-head BCE loss coefficient.")
     parser.add_argument("--enable-risk-shield", action="store_true", help="Enable inference-time risk shielding.")
     parser.add_argument("--risk-shield-threshold", type=float, default=0.80, help="Risk threshold for shielding.")
+    parser.add_argument(
+        "--action-mask-dropout-warmup-updates",
+        type=int,
+        default=0,
+        help="Linear warmup updates for action-mask dropout curriculum (0 disables schedule).",
+    )
     parser.add_argument("--use-constrained-rl", action="store_true", help="Enable Lagrangian constrained RL penalties.")
     parser.add_argument("--constraint-budget", type=float, default=0.15, help="Constraint violation budget for constrained RL.")
     parser.add_argument("--catastrophic-budget", type=float, default=0.05, help="Catastrophic event budget for constrained RL.")
@@ -1507,6 +1525,7 @@ def _run_suite(
     risk_head_coef: float = 0.10,
     enable_risk_shield: bool = False,
     risk_shield_threshold: float = 0.80,
+    action_mask_dropout_warmup_updates: int = 0,
     use_constrained_rl: bool = False,
     constraint_budget: float = 0.15,
     catastrophic_budget: float = 0.05,
@@ -1668,6 +1687,7 @@ def _run_suite(
             "risk_head_coef": float(risk_head_coef),
             "enable_risk_shield": bool(enable_risk_shield),
             "risk_shield_threshold": float(risk_shield_threshold),
+            "action_mask_dropout_warmup_updates": int(max(0, action_mask_dropout_warmup_updates)),
             "use_constrained_rl": bool(use_constrained_rl),
             "constraint_budget": float(constraint_budget),
             "catastrophic_budget": float(catastrophic_budget),
@@ -1722,6 +1742,7 @@ def _run_suite(
                     repo_bc_episodes = 0
                     repo_online_bc_coef = 0.10
                     action_mask_dropout_prob = 0.0
+                    action_mask_dropout_warmup = int(max(0, action_mask_dropout_warmup_updates))
                     run_regime_aware_replay = False
                     run_replay_frac_current = 0.5
                     run_deterministic_torch = bool(
@@ -1783,17 +1804,21 @@ def _run_suite(
                         repo_bc_episodes = 64 if quick else 128
                         repo_online_bc_coef = 0.0
                         action_mask_dropout_prob = 0.0
+                        action_mask_dropout_warmup = 0
                         run_force_cpu = bool(run_force_cpu or auto_force_cpu_repo)
                         if suite.name == "tools":
                             # Gate-1 sweep winner: stronger unmasked transfer.
                             repo_bc_episodes = 96 if quick else 112
                             repo_online_bc_coef = 0.30
                             action_mask_dropout_prob = 0.10
+                            action_mask_dropout_warmup = 4 if quick else 8
                         elif suite.name == "tools_open":
                             # Open-action tasks are harder than masked tool-loop:
                             # keep a stronger online BC anchor and reduce planner bias.
                             repo_bc_episodes = 112 if quick else 160
                             repo_online_bc_coef = 0.60
+                            action_mask_dropout_prob = 0.12 if quick else 0.18
+                            action_mask_dropout_warmup = 6 if quick else 10
                             run_planning_coef = 0.0
                     if suite.name in {"lifelong", "lifelong_diag"}:
                         run_mode = "lifelong"
@@ -1806,6 +1831,21 @@ def _run_suite(
                         # improves forgetting without collapsing adaptation.
                         run_replay_frac_current = 0.3 if quick else 0.7
                         run_deterministic_torch = True
+                    if suite.name in {"safety", "safety_ood"}:
+                        # Safety-first defaults for Gate2 closure: run shield + constrained RL
+                        # unless caller explicitly requested stricter alternatives.
+                        if not bool(enable_risk_shield):
+                            run_enable_risk_shield = True
+                        if not bool(use_constrained_rl):
+                            run_use_constrained_rl = True
+                        run_risk_head_coef = max(float(run_risk_head_coef), 0.25)
+                        if suite.name == "safety_ood":
+                            run_risk_shield_threshold = min(float(run_risk_shield_threshold), 0.55)
+                        else:
+                            run_risk_shield_threshold = min(float(run_risk_shield_threshold), 0.60)
+                        run_constraint_budget = min(float(run_constraint_budget), 0.12)
+                        run_catastrophic_budget = min(float(run_catastrophic_budget), 0.04)
+                        run_lagrangian_lr = max(float(run_lagrangian_lr), 0.02)
                     res = run_experiment(
                         seed=int(seed),
                         mode=run_mode,
@@ -1861,6 +1901,7 @@ def _run_suite(
                         deterministic_torch=bool(run_deterministic_torch),
                         force_cpu=bool(run_force_cpu),
                         action_mask_dropout_prob=float(action_mask_dropout_prob),
+                        action_mask_dropout_warmup_updates=int(max(0, action_mask_dropout_warmup)),
                         repo_online_bc_coef=float(repo_online_bc_coef),
                         repo_bc_pretrain_episodes=int(repo_bc_episodes),
                         repo_bc_pretrain_max_steps=int(run_eval_max_steps),
@@ -1881,7 +1922,7 @@ def _run_suite(
                     timeout_eps = int(eval_metrics.get("timeout_episodes", 0) or 0)
                 capped_all_eps = timeout_eps >= int(eval_episodes)
 
-                pass_masked, pass_unmasked, steps_unmasked = _extract_repo_metrics(eval_metrics)
+                pass_masked, pass_unmasked, steps_unmasked, recovery_unmasked = _extract_repo_metrics(eval_metrics)
                 mean_steps_unmasked = _safe_mean([float(x) for x in steps_unmasked])
                 pass_flag = None
                 if pass_unmasked is not None:
@@ -1901,6 +1942,7 @@ def _run_suite(
                     "pass_rate_unmasked": pass_unmasked,
                     "steps": mean_steps_unmasked,
                     "invalid_rate": None,
+                    "recovery_rate": recovery_unmasked,
                 }
                 if error_msg:
                     per_env_entry["error"] = error_msg
@@ -1933,20 +1975,24 @@ def _run_suite(
         masked_vals = []
         unmasked_vals = []
         steps_vals: List[int] = []
+        recovery_vals: List[float] = []
         for record in run_records:
             case = record["case"]
             if case.env_type != "repo" or record.get("status") != "ok":
                 continue
             eval_metrics = record.get("eval")
-            pass_masked, pass_unmasked, steps_unmasked = _extract_repo_metrics(eval_metrics)
+            pass_masked, pass_unmasked, steps_unmasked, recovery_unmasked = _extract_repo_metrics(eval_metrics)
             if pass_masked is not None:
                 masked_vals.append(float(pass_masked))
             if pass_unmasked is not None:
                 unmasked_vals.append(float(pass_unmasked))
             steps_vals.extend([int(x) for x in steps_unmasked])
+            if isinstance(recovery_unmasked, (int, float)) and math.isfinite(float(recovery_unmasked)):
+                recovery_vals.append(float(recovery_unmasked))
         pass_rate_masked = _safe_mean(masked_vals)
         pass_rate_unmasked = _safe_mean(unmasked_vals)
         mean_steps_unmasked = _safe_mean([float(x) for x in steps_vals])
+        recovery_rate = _safe_mean(recovery_vals)
         invalid_action_rate = None
         mean_invalid_mass = None
         mask_pred_f1 = None
@@ -2014,6 +2060,7 @@ def _run_suite(
         if masked_only:
             pass_rate_unmasked = None
             mean_steps_unmasked = None
+            recovery_rate = None
             notes.append("masked_only: unmasked metrics suppressed")
         if unmasked_only:
             pass_rate_masked = None
@@ -2024,6 +2071,7 @@ def _run_suite(
                 "pass_rate_unmasked": pass_rate_unmasked,
                 "mean_steps_to_pass_unmasked": mean_steps_unmasked,
                 "invalid_action_rate": invalid_action_rate,
+                "recovery_rate": recovery_rate,
                 "mask_pred_f1": mask_pred_f1,
                 "mask_pred_auc": mask_pred_auc,
                 "bc_pretrain_used": bool(bc_pretrain_used),
@@ -2034,20 +2082,28 @@ def _run_suite(
                 "ood_gap": None,
             }
         )
-        score = _tools_score(pass_rate_unmasked, invalid_action_rate, mean_steps_unmasked)
+        score = _tools_score(
+            pass_rate_unmasked,
+            invalid_action_rate,
+            mean_steps_unmasked,
+            recovery_rate=recovery_rate,
+        )
     elif suite.name == "tools_open":
         unmasked_vals: List[float] = []
         steps_vals: List[int] = []
         invalid_rate_vals: List[float] = []
+        recovery_vals: List[float] = []
         for record in run_records:
             case = record.get("case")
             if getattr(case, "env_type", None) != "repo" or record.get("status") != "ok":
                 continue
             eval_metrics = record.get("eval")
-            _pass_masked, pass_unmasked, steps_unmasked = _extract_repo_metrics(eval_metrics)
+            _pass_masked, pass_unmasked, steps_unmasked, recovery_unmasked = _extract_repo_metrics(eval_metrics)
             if pass_unmasked is not None:
                 unmasked_vals.append(float(pass_unmasked))
             steps_vals.extend([int(x) for x in steps_unmasked])
+            if isinstance(recovery_unmasked, (int, float)) and math.isfinite(float(recovery_unmasked)):
+                recovery_vals.append(float(recovery_unmasked))
 
             res = record.get("result") or {}
             if not isinstance(res, dict):
@@ -2065,6 +2121,7 @@ def _run_suite(
         pass_rate_unmasked = _safe_mean(unmasked_vals)
         mean_steps_unmasked = _safe_mean([float(x) for x in steps_vals])
         invalid_action_rate = _safe_mean(invalid_rate_vals)
+        recovery_rate = _safe_mean(recovery_vals)
         if masked_only:
             notes.append("masked_only ignored for tools_open: suite reports unmasked-only metrics")
 
@@ -2073,10 +2130,16 @@ def _run_suite(
                 "pass_rate_unmasked": pass_rate_unmasked,
                 "mean_steps_to_pass_unmasked": mean_steps_unmasked,
                 "invalid_action_rate": invalid_action_rate,
+                "recovery_rate": recovery_rate,
                 "ood_gap": None,
             }
         )
-        score = _tools_score(pass_rate_unmasked, invalid_action_rate, mean_steps_unmasked)
+        score = _tools_score(
+            pass_rate_unmasked,
+            invalid_action_rate,
+            mean_steps_unmasked,
+            recovery_rate=recovery_rate,
+        )
     elif suite.name in {"long_horizon", "planning_diag"}:
         mean_returns: List[float] = []
         test_returns: List[float] = []
@@ -2445,6 +2508,7 @@ def main() -> int:
         "risk_head_coef": float(args.risk_head_coef),
         "enable_risk_shield": bool(args.enable_risk_shield),
         "risk_shield_threshold": float(args.risk_shield_threshold),
+        "action_mask_dropout_warmup_updates": int(args.action_mask_dropout_warmup_updates),
         "use_constrained_rl": bool(args.use_constrained_rl),
         "constraint_budget": float(args.constraint_budget),
         "catastrophic_budget": float(args.catastrophic_budget),
@@ -2566,6 +2630,7 @@ def main() -> int:
                 risk_head_coef=float(args.risk_head_coef),
                 enable_risk_shield=bool(args.enable_risk_shield),
                 risk_shield_threshold=float(args.risk_shield_threshold),
+                action_mask_dropout_warmup_updates=int(args.action_mask_dropout_warmup_updates),
                 use_constrained_rl=bool(args.use_constrained_rl),
                 constraint_budget=float(args.constraint_budget),
                 catastrophic_budget=float(args.catastrophic_budget),

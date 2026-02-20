@@ -109,6 +109,7 @@ class RepoToolEnvConfig:
     toolloop_idle_with_candidates_penalty: float = -0.02
     toolloop_apply_ready_reward: float = 0.03
     toolloop_run_after_apply_reward: float = 0.03
+    toolloop_redundant_run_tests_penalty: float = -0.03
     toolloop_revert_without_patch_penalty: float = -0.08
     toolloop_action_mask: bool = True
     toolloop_action_mask_allow_cycle: bool = True
@@ -2181,6 +2182,7 @@ class RepoToolEnv(BaseEnv):
         done = False
         death_flag = 0.0
         alive = 1.0
+        redundant_run_tests = False
 
         if bootstrap_needed and action != 3:
             reward += float(cfg.toolloop_wait_penalty)
@@ -2240,6 +2242,9 @@ class RepoToolEnv(BaseEnv):
                 reward += float(cfg.run_tests_penalty)
             if ready_to_verify:
                 reward += float(cfg.toolloop_run_after_apply_reward)
+            if toolloop and (not self.workspace_dirty) and self.last_test_passed is False:
+                redundant_run_tests = True
+                reward += float(cfg.toolloop_redundant_run_tests_penalty)
             if self.workspace_dirty or self.last_test_passed is None:
                 prev_progress = float(self._progress())
                 prev_candidates = int(len(self.current_task.patches or [])) if (toolloop and self.current_task is not None) else 0
@@ -2332,6 +2337,7 @@ class RepoToolEnv(BaseEnv):
                 "steps_taken": float(info.get("steps_taken", 0) or 0),
                 "remaining_steps": float(info.get("remaining_steps", 0) or 0),
                 "death_flag": float(death_flag),
+                "redundant_run_tests": float(bool(redundant_run_tests)),
             },
         )
 

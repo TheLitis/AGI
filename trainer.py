@@ -245,6 +245,7 @@ class Trainer:
         planner_world_reward_blend: float = 0.70,
         action_mask_internalization_coef: float = 0.10,
         action_mask_dropout_prob: float = 0.0,
+        action_mask_dropout_warmup_updates: int = 0,
         action_mask_prediction_coef: float = 0.10,
         repo_online_bc_coef: float = 0.10,
         risk_head_coef: float = 0.10,
@@ -361,9 +362,16 @@ class Trainer:
         # policy to "internalize" invalid actions by penalizing probability mass outside the mask.
         self.action_mask_internalization_coef = float(action_mask_internalization_coef)
         try:
-            self.action_mask_dropout_prob = max(0.0, min(1.0, float(action_mask_dropout_prob)))
+            self.action_mask_dropout_target = max(0.0, min(1.0, float(action_mask_dropout_prob)))
         except Exception:
-            self.action_mask_dropout_prob = 0.0
+            self.action_mask_dropout_target = 0.0
+        try:
+            self.action_mask_dropout_warmup_updates = max(0, int(action_mask_dropout_warmup_updates or 0))
+        except Exception:
+            self.action_mask_dropout_warmup_updates = 0
+        # Backward-compatible alias used in configs/reports.
+        self.action_mask_dropout_prob = float(self.action_mask_dropout_target)
+        self.policy_update_count = 0
         self.action_mask_prediction_coef = max(0.0, float(action_mask_prediction_coef or 0.0))
         # Conservative unmasked bias from predicted action-mask logits:
         # only high-confidence predictions are used, with limited strength.
@@ -392,6 +400,8 @@ class Trainer:
         self.last_risk_max_prob = 0.0
         self.last_constraint_event_rate = 0.0
         self.last_catastrophic_event_rate = 0.0
+        self.last_invalid_action_rate = 0.0
+        self.last_masked_decision_steps = 0
         self._trait_safety_ctx: Dict[str, Dict[str, Any]] = {}
 
         descriptors = None
@@ -741,6 +751,19 @@ class Trainer:
             probs = torch.where(confident, probs, torch.ones_like(probs))
         blended_probs = ((1.0 - mix) + mix * probs).clamp(min=min_prob, max=1.0)
         return logits + torch.log(blended_probs)
+
+    def _current_action_mask_dropout_prob(self) -> float:
+        """
+        Linear masked->semi->unmasked curriculum for action-mask dropout.
+        """
+        target = float(getattr(self, "action_mask_dropout_target", 0.0) or 0.0)
+        target = max(0.0, min(1.0, target))
+        warmup = int(getattr(self, "action_mask_dropout_warmup_updates", 0) or 0)
+        if target <= 0.0 or warmup <= 0:
+            return target
+        update_idx = max(0, int(getattr(self, "policy_update_count", 0) or 0))
+        progress = max(0.0, min(1.0, float(update_idx) / float(max(1, warmup))))
+        return float(target * progress)
 
     def _effective_unmasked_mask_confidence_threshold(self) -> float:
         low = float(getattr(self, "unmasked_mask_confidence_threshold", 0.90) or 0.90)
@@ -4823,10 +4846,13 @@ class Trainer:
         risk_max_probs: List[float] = []
         constraint_events = 0
         catastrophic_events = 0
+        masked_decision_steps = 0
+        invalid_action_steps = 0
         planner_alpha_vals: List[float] = []
         planner_js_vals: List[float] = []
         planner_margin_vals: List[float] = []
         planner_override_vals: List[float] = []
+        dropout_p_rollout = float(self._current_action_mask_dropout_prob())
         patch_shape = patch_np.shape
 
         skill_state = {
@@ -4951,6 +4977,7 @@ class Trainer:
             logits_for_online_bc: Optional[torch.Tensor] = None
             selected_risk_violation_logit: Optional[torch.Tensor] = None
             selected_risk_catastrophic_logit: Optional[torch.Tensor] = None
+            mask: Optional[torch.Tensor] = None
 
             if self.use_skills and self.agent.high_level_policy is not None and self._total_skill_count() > 0:
                 action, logprob, entropy, skill_state = self._select_action_with_skills(
@@ -4991,9 +5018,8 @@ class Trainer:
                     if max_prob > 0.0:
                         risk_max_probs.append(float(max_prob))
                     apply_mask = True
-                    dropout_p = float(getattr(self, "action_mask_dropout_prob", 0.0) or 0.0)
-                    if dropout_p > 0.0 and has_invalid:
-                        if torch.rand((), device=logits_shielded.device).item() < dropout_p:
+                    if dropout_p_rollout > 0.0 and has_invalid:
+                        if torch.rand((), device=logits_shielded.device).item() < dropout_p_rollout:
                             apply_mask = False
                     logits = self._compose_policy_logits_with_masks(
                         logits_shielded,
@@ -5060,9 +5086,8 @@ class Trainer:
                 if max_prob > 0.0:
                     risk_max_probs.append(float(max_prob))
                 apply_mask = True
-                dropout_p = float(getattr(self, "action_mask_dropout_prob", 0.0) or 0.0)
-                if dropout_p > 0.0 and has_invalid:
-                    if torch.rand((), device=logits_shielded.device).item() < dropout_p:
+                if dropout_p_rollout > 0.0 and has_invalid:
+                    if torch.rand((), device=logits_shielded.device).item() < dropout_p_rollout:
                         apply_mask = False
                 logits = self._compose_policy_logits_with_masks(
                     logits_shielded,
@@ -5090,6 +5115,14 @@ class Trainer:
                     online_bc_targets_list.append(
                         torch.tensor([int(expert_action)], dtype=torch.long, device=self.device)
                     )
+
+            # Diagnostics: how often sampled actions violate the currently visible action mask.
+            if mask is not None and isinstance(action, torch.Tensor) and mask.numel() > 0:
+                action_idx = int(action.item())
+                if 0 <= action_idx < int(mask.shape[-1]):
+                    masked_decision_steps += 1
+                    if not bool(mask.view(-1)[action_idx].item()):
+                        invalid_action_steps += 1
 
             # world model step for curiosity
             _, h_w_new, z_hat, H_hat = self.agent.world_model.forward_step(
@@ -5268,6 +5301,11 @@ class Trainer:
         self.last_risk_max_prob = float(np.mean(risk_max_probs)) if risk_max_probs else 0.0
         self.last_constraint_event_rate = float(constraint_events) / float(max(1, step_idx))
         self.last_catastrophic_event_rate = float(catastrophic_events) / float(max(1, step_idx))
+        self.last_masked_decision_steps = int(masked_decision_steps)
+        if masked_decision_steps > 0:
+            self.last_invalid_action_rate = float(invalid_action_steps) / float(masked_decision_steps)
+        else:
+            self.last_invalid_action_rate = 0.0
 
         return (
             actions_t,
@@ -5833,6 +5871,7 @@ class Trainer:
         cur_beta_eff = self.get_adaptive_curiosity_beta(curiosity_beta)
         # мета-адаптивный коэффициент планирования
         planning_coef_eff = self.get_adaptive_planning_coef(planning_coef)
+        mask_dropout_prob_eff = float(self._current_action_mask_dropout_prob())
 
         (
             actions,
@@ -5916,12 +5955,19 @@ class Trainer:
             stats["catastrophic_rate"] = float(catastrophic_rate)
         stats["risk_shield_blocked_rate"] = float(getattr(self, "last_risk_shield_blocked_rate", 0.0))
         stats["risk_max_prob"] = float(getattr(self, "last_risk_max_prob", 0.0))
+        stats["invalid_action_rate"] = float(getattr(self, "last_invalid_action_rate", 0.0))
+        stats["masked_decision_steps"] = float(getattr(self, "last_masked_decision_steps", 0))
+        stats["action_mask_dropout_prob_effective"] = float(mask_dropout_prob_eff)
+        stats["action_mask_dropout_target"] = float(getattr(self, "action_mask_dropout_target", 0.0))
+        stats["action_mask_dropout_warmup_updates"] = float(getattr(self, "action_mask_dropout_warmup_updates", 0))
 
         self.update_memory_from_buffer(
             batch_size=32,
             seq_len=32,
             memory_alpha=0.05,
         )
+        self.policy_update_count = int(getattr(self, "policy_update_count", 0) or 0) + 1
+        stats["policy_update_count"] = float(self.policy_update_count)
 
         # обновляем мета-статистики (медленное состояние "я запутан / я уверен")
 
@@ -5948,10 +5994,12 @@ class Trainer:
         online_bc_loss = float(stats.get("online_bc_loss", 0.0))
         online_bc_samples = float(stats.get("online_bc_samples", 0.0))
         gae_lambda_eff = float(stats.get("gae_lambda_eff", getattr(self, "gae_lambda_base", 0.95)))
+        invalid_action_rate = float(stats.get("invalid_action_rate", 0.0))
+        dropout_prob_eff = float(stats.get("action_mask_dropout_prob_effective", 0.0))
         print(
             f"[A2C] use_self={use_self} | "
             f"mean_conflict={mean_conflict:.4f}, mean_uncertainty={mean_uncertainty:.4f}, "
-            f"mean_invalid_mass={mean_invalid_mass:.4f} | "
+            f"mean_invalid_mass={mean_invalid_mass:.4f}, invalid_action_rate={invalid_action_rate:.4f} | "
             f"meta_conflict_ma={meta_conflict_ma:.4f}, meta_uncertainty_ma={meta_uncertainty_ma:.4f} | "
             f"entropy_coef_eff={entropy_eff:.5f}, curiosity_beta_eff={cur_beta_eff:.5f}, "
             f"planning_coef_eff={planning_coef_eff:.5f}, gae_lambda_eff={gae_lambda_eff:.4f}, "
@@ -5960,7 +6008,8 @@ class Trainer:
             f"planner_margin_mean={planner_margin_mean:.3f}, planner_override_rate={planner_override_rate:.3f} | "
             f"beta_conflict={beta_conflict:.3f}, beta_uncertainty={beta_uncertainty:.3f}, "
             f"mask_pred_f1={mask_pred_f1:.3f}, mask_pred_auc={mask_pred_auc:.3f}, "
-            f"online_bc_loss={online_bc_loss:.4f}, online_bc_samples={online_bc_samples:.0f}"
+            f"online_bc_loss={online_bc_loss:.4f}, online_bc_samples={online_bc_samples:.0f}, "
+            f"mask_dropout_eff={dropout_prob_eff:.3f}"
         )
         return stats
 
@@ -6804,6 +6853,8 @@ class Trainer:
             repo_pass_flags_test: List[bool] = []
             repo_steps_to_pass_train: List[int] = []
             repo_steps_to_pass_test: List[int] = []
+            repo_failure_episodes = 0
+            repo_recovered_episodes = 0
             instruction_success_flags: List[bool] = []
             instruction_success_flags_train: List[bool] = []
             instruction_success_flags_test: List[bool] = []
@@ -6881,6 +6932,7 @@ class Trainer:
                 info: Dict[str, Any] = {}
                 episode_rewards: List[float] = []
                 episode_planner_reality_rows: List[Tuple[int, float, float, float, float]] = []
+                repo_episode_saw_failure = False
 
                 while not done and t < max_steps:
                     skill_state["obs_history"].append({"patch": patch.copy(), "energy": float(energy)})
@@ -7066,6 +7118,9 @@ class Trainer:
                     info = flags["normalized_info"]
                     reward_env = self.compute_preference_reward(info)
                     episode_rewards.append(float(reward_env))
+                    if isinstance(info, dict) and "last_test_passed" in info:
+                        if info.get("last_test_passed") is False:
+                            repo_episode_saw_failure = True
                     if (
                         diag_planner_score is not None
                         and diag_policy_score is not None
@@ -7157,6 +7212,10 @@ class Trainer:
                     repo_pass_flags.append(passed_flag)
                     if passed_flag:
                         repo_steps_to_pass.append(int(info.get("steps_taken", t)))
+                    if repo_episode_saw_failure:
+                        repo_failure_episodes += 1
+                        if passed_flag:
+                            repo_recovered_episodes += 1
 
                 reason_raw = ""
                 if isinstance(info, dict):
@@ -7397,6 +7456,12 @@ class Trainer:
             if repo_pass_flags:
                 metrics["repo_pass_rate"] = float(np.mean(repo_pass_flags))
                 metrics["repo_steps_to_pass"] = [int(x) for x in repo_steps_to_pass]
+                metrics["repo_failure_episodes"] = int(repo_failure_episodes)
+                metrics["repo_recovered_episodes"] = int(repo_recovered_episodes)
+                if repo_failure_episodes > 0:
+                    metrics["repo_recovery_rate"] = float(repo_recovered_episodes) / float(repo_failure_episodes)
+                else:
+                    metrics["repo_recovery_rate"] = None
                 if repo_pass_flags_train:
                     metrics["repo_train_pass_rate"] = float(np.mean(repo_pass_flags_train))
                     metrics["repo_train_steps_to_pass"] = [int(x) for x in repo_steps_to_pass_train]
@@ -7449,6 +7514,9 @@ class Trainer:
                 "repo_pass_rate",
                 "repo_train_pass_rate",
                 "repo_test_pass_rate",
+                "repo_recovery_rate",
+                "repo_failure_episodes",
+                "repo_recovered_episodes",
                 "instruction_success_rate",
                 "instruction_train_success_rate",
                 "instruction_test_success_rate",
