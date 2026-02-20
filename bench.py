@@ -15,7 +15,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -690,6 +690,39 @@ def _extract_eval_metrics(
     suite_name: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     stage_metrics = run_result.get("stage_metrics", {}) if isinstance(run_result, dict) else {}
+    if not isinstance(stage_metrics, dict):
+        return None
+
+    def _best_by_score(keys: Sequence[str]) -> Optional[Dict[str, Any]]:
+        best: Optional[Dict[str, Any]] = None
+        best_score = float("-inf")
+        for key in keys:
+            cand = stage_metrics.get(str(key))
+            if not isinstance(cand, dict):
+                continue
+            score = _eval_quality_score(cand, suite_name=suite_name)
+            if best is None or score > best_score:
+                best = cand
+                best_score = score
+        return best
+
+    name = str(suite_name or "").strip().lower()
+    if name in {"tools", "tools_open"}:
+        # Tool workflows are prone to late-stage regressions.
+        # Prefer the best available evaluated checkpoint by the same suite metric.
+        best_tools = _best_by_score(
+            (
+                "eval_after_stage4_self",
+                "eval_after_stage4_no_self",
+                "eval_after_stage4",
+                "eval_after_stage3_self",
+                "eval_after_stage3_no_self",
+                "eval_after_stage2",
+            )
+        )
+        if isinstance(best_tools, dict):
+            return best_tools
+
     eval_default = stage_metrics.get("eval_after_stage4_no_self")
     if not isinstance(eval_default, dict):
         eval_default = stage_metrics.get("eval_after_stage4")

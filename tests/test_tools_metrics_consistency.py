@@ -38,3 +38,41 @@ def test_tools_score_penalizes_low_recovery_rate():
 def test_tools_metric_templates_include_recovery_rate():
     assert "recovery_rate" in bench._metric_template("tools")
     assert "recovery_rate" in bench._metric_template("tools_open")
+
+
+def test_extract_eval_metrics_tools_prefers_best_checkpoint():
+    run_result = {
+        "stage_metrics": {
+            "eval_after_stage2": {
+                "repo_pass_rate": 1.0,
+                "unmasked": {"repo_pass_rate": 0.70, "repo_steps_to_pass": [8, 10]},
+            },
+            "eval_after_stage4_no_self": {
+                "repo_pass_rate": 1.0,
+                "unmasked": {"repo_pass_rate": 0.25, "repo_steps_to_pass": [2]},
+            },
+            "eval_after_stage4_self": {
+                "repo_pass_rate": 1.0,
+                "unmasked": {"repo_pass_rate": 0.10, "repo_steps_to_pass": [2]},
+            },
+        }
+    }
+    selected = bench._extract_eval_metrics(run_result, suite_name="tools")
+    assert isinstance(selected, dict)
+    pass_masked, pass_unmasked, _steps, _recovery = bench._extract_repo_metrics(selected)
+    assert pass_masked == 1.0
+    assert pass_unmasked == 0.70
+
+
+def test_extract_eval_metrics_non_tools_keeps_stage4_selection():
+    run_result = {
+        "stage_metrics": {
+            "eval_after_stage2": {"mean_return": 9.0},
+            "eval_after_stage4_no_self": {"mean_return": 1.0},
+            "eval_after_stage4_self": {"mean_return": 2.0},
+        }
+    }
+    selected = bench._extract_eval_metrics(run_result, suite_name="core")
+    assert isinstance(selected, dict)
+    # Non-tools suites should still choose between stage4 self/no_self only.
+    assert float(selected.get("mean_return")) == 2.0
