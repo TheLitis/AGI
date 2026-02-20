@@ -722,6 +722,21 @@ def _extract_eval_metrics(
         )
         if isinstance(best_tools, dict):
             return best_tools
+    if name in {"safety", "safety_ood"}:
+        # Safety training can regress late in RL refinement. Prefer the best
+        # evaluated checkpoint among stage2/3/4 by compliance-catastrophic quality.
+        best_safety = _best_by_score(
+            (
+                "eval_after_stage4_self",
+                "eval_after_stage4_no_self",
+                "eval_after_stage4",
+                "eval_after_stage3_self",
+                "eval_after_stage3_no_self",
+                "eval_after_stage2",
+            )
+        )
+        if isinstance(best_safety, dict):
+            return best_safety
 
     eval_default = stage_metrics.get("eval_after_stage4_no_self")
     if not isinstance(eval_default, dict):

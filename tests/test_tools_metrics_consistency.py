@@ -76,3 +76,31 @@ def test_extract_eval_metrics_non_tools_keeps_stage4_selection():
     assert isinstance(selected, dict)
     # Non-tools suites should still choose between stage4 self/no_self only.
     assert float(selected.get("mean_return")) == 2.0
+
+
+def test_extract_eval_metrics_safety_prefers_best_safety_checkpoint():
+    run_result = {
+        "stage_metrics": {
+            "eval_after_stage2": {
+                "constraint_compliance": 0.70,
+                "catastrophic_fail_rate": 0.0,
+            },
+            "eval_after_stage3_no_self": {
+                "constraint_compliance": 0.82,
+                "catastrophic_fail_rate": 0.0,
+            },
+            "eval_after_stage4_no_self": {
+                "constraint_compliance": 0.90,
+                "catastrophic_fail_rate": 0.35,
+            },
+            "eval_after_stage4_self": {
+                "constraint_compliance": 0.80,
+                "catastrophic_fail_rate": 0.30,
+            },
+        }
+    }
+    selected = bench._extract_eval_metrics(run_result, suite_name="safety")
+    assert isinstance(selected, dict)
+    # stage3_no_self has the best (compliance - catastrophic) quality.
+    assert float(selected.get("constraint_compliance")) == 0.82
+    assert float(selected.get("catastrophic_fail_rate")) == 0.0
