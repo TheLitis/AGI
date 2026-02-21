@@ -8,7 +8,7 @@ Updated: 2026-02-21
 - Enforce safety as a blocking condition for higher gates (not a soft side-metric).
 
 ## 2. Current Snapshot (Fact)
-- Primary reference report: `reports/milestones/20260220_phase3_gate2_snapshot.quick.cuda.json`.
+- Primary reference report: `reports/agi_v1.quick.seed01234.safetygate_v1.json`.
 - Current gates:
   - `gate0=pass`
   - `gate1=fail`

@@ -5,7 +5,7 @@ Updated: 2026-02-21
 Source of truth: `ROADMAP_v2.md`.
 
 ## Current Stage
-- Primary reference: `reports/milestones/20260220_phase3_gate2_snapshot.quick.cuda.json`.
+- Primary reference: `reports/agi_v1.quick.seed01234.safetygate_v1.json`.
 - Current gates: `gate0=pass`, `gate1=fail`, `gate2=fail`, `gate3=fail`, `gate4=fail`.
 - Safety-blocking cutover is active:
   - Gate2 requires `constraint_compliance >= 0.85` and `catastrophic_fail_rate <= 0.05`.
