@@ -1523,6 +1523,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enable-risk-shield", action="store_true", help="Enable inference-time risk shielding.")
     parser.add_argument("--risk-shield-threshold", type=float, default=0.80, help="Risk threshold for shielding.")
     parser.add_argument(
+        "--risk-profile-scope",
+        type=str,
+        default="auto",
+        choices=["auto", "all"],
+        help="auto: apply risk controls to safety suites only; all: apply global risk flags to every suite.",
+    )
+    parser.add_argument(
         "--action-mask-dropout-warmup-updates",
         type=int,
         default=0,
@@ -1573,6 +1580,7 @@ def _run_suite(
     risk_head_coef: float = 0.10,
     enable_risk_shield: bool = False,
     risk_shield_threshold: float = 0.80,
+    risk_profile_scope: str = "auto",
     action_mask_dropout_warmup_updates: int = 0,
     use_constrained_rl: bool = False,
     constraint_budget: float = 0.15,
@@ -1603,6 +1611,19 @@ def _run_suite(
         suite_result["notes"].append("stubbed suite for Gate 0")
         _save_report(report_path, report)
         return suite_result
+
+    risk_scope = str(risk_profile_scope or "auto").strip().lower()
+    if risk_scope not in {"auto", "all"}:
+        risk_scope = "auto"
+    use_non_safety_risk_baseline = bool(risk_scope == "auto" and suite.name not in {"safety", "safety_ood"})
+    suite_risk_head_coef = float(0.10 if use_non_safety_risk_baseline else risk_head_coef)
+    suite_enable_risk_shield = bool(False if use_non_safety_risk_baseline else enable_risk_shield)
+    suite_risk_shield_threshold = float(0.80 if use_non_safety_risk_baseline else risk_shield_threshold)
+    suite_use_constrained_rl = bool(False if use_non_safety_risk_baseline else use_constrained_rl)
+    suite_constraint_budget = float(0.15 if use_non_safety_risk_baseline else constraint_budget)
+    suite_catastrophic_budget = float(0.05 if use_non_safety_risk_baseline else catastrophic_budget)
+    suite_lagrangian_lr = float(0.01 if use_non_safety_risk_baseline else lagrangian_lr)
+    suite_lagrangian_max = float(10.0 if use_non_safety_risk_baseline else lagrangian_max)
 
     episodes_per_phase = 50
     n_steps = 1024
@@ -1732,15 +1753,16 @@ def _run_suite(
             "planner_world_reward_blend": float(planner_world_reward_blend_base),
             "safety_penalty_coef": float(safety_penalty_coef_base),
             "safety_threshold": float(safety_threshold_base),
-            "risk_head_coef": float(risk_head_coef),
-            "enable_risk_shield": bool(enable_risk_shield),
-            "risk_shield_threshold": float(risk_shield_threshold),
+            "risk_profile_scope": str(risk_scope),
+            "risk_head_coef": float(suite_risk_head_coef),
+            "enable_risk_shield": bool(suite_enable_risk_shield),
+            "risk_shield_threshold": float(suite_risk_shield_threshold),
             "action_mask_dropout_warmup_updates": int(max(0, action_mask_dropout_warmup_updates)),
-            "use_constrained_rl": bool(use_constrained_rl),
-            "constraint_budget": float(constraint_budget),
-            "catastrophic_budget": float(catastrophic_budget),
-            "lagrangian_lr": float(lagrangian_lr),
-            "lagrangian_max": float(lagrangian_max),
+            "use_constrained_rl": bool(suite_use_constrained_rl),
+            "constraint_budget": float(suite_constraint_budget),
+            "catastrophic_budget": float(suite_catastrophic_budget),
+            "lagrangian_lr": float(suite_lagrangian_lr),
+            "lagrangian_max": float(suite_lagrangian_max),
             "run_self_reflection": bool(run_self_reflection),
             "run_stage3c": bool(run_stage3c),
             "run_lifecycle": bool(run_lifecycle),
@@ -1816,14 +1838,14 @@ def _run_suite(
                     run_planner_world_reward_blend = float(planner_world_reward_blend_base)
                     run_safety_penalty_coef = float(safety_penalty_coef_base)
                     run_safety_threshold = float(safety_threshold_base)
-                    run_risk_head_coef = float(risk_head_coef)
-                    run_enable_risk_shield = bool(enable_risk_shield)
-                    run_risk_shield_threshold = float(risk_shield_threshold)
-                    run_use_constrained_rl = bool(use_constrained_rl)
-                    run_constraint_budget = float(constraint_budget)
-                    run_catastrophic_budget = float(catastrophic_budget)
-                    run_lagrangian_lr = float(lagrangian_lr)
-                    run_lagrangian_max = float(lagrangian_max)
+                    run_risk_head_coef = float(suite_risk_head_coef)
+                    run_enable_risk_shield = bool(suite_enable_risk_shield)
+                    run_risk_shield_threshold = float(suite_risk_shield_threshold)
+                    run_use_constrained_rl = bool(suite_use_constrained_rl)
+                    run_constraint_budget = float(suite_constraint_budget)
+                    run_catastrophic_budget = float(suite_catastrophic_budget)
+                    run_lagrangian_lr = float(suite_lagrangian_lr)
+                    run_lagrangian_max = float(suite_lagrangian_max)
                     case_max_steps_env = (
                         int(case.max_steps_env)
                         if isinstance(case.max_steps_env, int) and int(case.max_steps_env) > 0
@@ -1882,9 +1904,9 @@ def _run_suite(
                     if suite.name in {"safety", "safety_ood"}:
                         # Safety-first defaults for Gate2 closure: run shield + constrained RL
                         # unless caller explicitly requested stricter alternatives.
-                        if not bool(enable_risk_shield):
+                        if not bool(suite_enable_risk_shield):
                             run_enable_risk_shield = True
-                        if not bool(use_constrained_rl):
+                        if not bool(suite_use_constrained_rl):
                             run_use_constrained_rl = True
                         run_risk_head_coef = max(float(run_risk_head_coef), 0.25)
                         if suite.name == "safety_ood":
@@ -2556,6 +2578,7 @@ def main() -> int:
         "risk_head_coef": float(args.risk_head_coef),
         "enable_risk_shield": bool(args.enable_risk_shield),
         "risk_shield_threshold": float(args.risk_shield_threshold),
+        "risk_profile_scope": str(args.risk_profile_scope),
         "action_mask_dropout_warmup_updates": int(args.action_mask_dropout_warmup_updates),
         "use_constrained_rl": bool(args.use_constrained_rl),
         "constraint_budget": float(args.constraint_budget),
@@ -2678,6 +2701,7 @@ def main() -> int:
                 risk_head_coef=float(args.risk_head_coef),
                 enable_risk_shield=bool(args.enable_risk_shield),
                 risk_shield_threshold=float(args.risk_shield_threshold),
+                risk_profile_scope=str(args.risk_profile_scope),
                 action_mask_dropout_warmup_updates=int(args.action_mask_dropout_warmup_updates),
                 use_constrained_rl=bool(args.use_constrained_rl),
                 constraint_budget=float(args.constraint_budget),
