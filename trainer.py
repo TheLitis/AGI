@@ -30,6 +30,7 @@ from memory import ReplayBuffer, Transition
 from models import traits_to_preference_weights
 from text_utils import hash_text_to_ids
 from info_contract import normalize_info_contract
+from interface_adapters import obs_to_packet, packet_to_obs
 from skills import (
     Skill,
     LatentSkill,
@@ -266,6 +267,8 @@ class Trainer:
         replay_frac_current: float = 0.5,
         skill_mode: str = "handcrafted",
         n_latent_skills: int = 0,
+        shadow_obspacket: bool = False,
+        shadow_toolcall: bool = False,
     ):
         self.env = env
         self.env_family: str = "gridworld"
@@ -402,6 +405,16 @@ class Trainer:
         self.last_catastrophic_event_rate = 0.0
         self.last_invalid_action_rate = 0.0
         self.last_masked_decision_steps = 0
+        self.shadow_obspacket_enabled = bool(shadow_obspacket)
+        self.shadow_toolcall_enabled = bool(shadow_toolcall)
+        self.shadow_obspacket_steps = 0
+        self.shadow_toolcall_steps = 0
+        self.shadow_roundtrip_mismatch_count = 0
+        self.shadow_error_count = 0
+        self.last_shadow_obspacket_steps = 0
+        self.last_shadow_toolcall_steps = 0
+        self.last_shadow_roundtrip_mismatch_count = 0
+        self.last_shadow_error_count = 0
         self._trait_safety_ctx: Dict[str, Dict[str, Any]] = {}
 
         descriptors = None
@@ -435,6 +448,7 @@ class Trainer:
         if env_descriptors is not None:
             self.env_descriptors = env_descriptors.to(self.device)
             self.env_desc_dim = self.env_descriptors.shape[-1]
+        self._set_shadow_toolcall_enabled(self.shadow_toolcall_enabled)
 
         # Structured, in-memory log of trait reflection events (shared with the agent for external access).
         self.trait_reflection_log: List[Dict[str, Any]] = []
@@ -845,6 +859,121 @@ class Trainer:
             except Exception:
                 pass
         return env_obj
+
+    def _iter_env_instances(self) -> List[Any]:
+        envs_list = getattr(self.env, "envs", None)
+        if isinstance(envs_list, list) and envs_list:
+            return list(envs_list)
+        return [self.env]
+
+    def _set_shadow_toolcall_enabled(self, enabled: bool) -> None:
+        enabled_flag = bool(enabled)
+        for env_obj in self._iter_env_instances():
+            setter = getattr(env_obj, "set_shadow_toolcall_enabled", None)
+            if callable(setter):
+                try:
+                    setter(enabled_flag)
+                except Exception:
+                    pass
+
+    def configure_shadow_runtime(
+        self,
+        *,
+        shadow_obspacket: Optional[bool] = None,
+        shadow_toolcall: Optional[bool] = None,
+    ) -> None:
+        if shadow_obspacket is not None:
+            self.shadow_obspacket_enabled = bool(shadow_obspacket)
+        if shadow_toolcall is not None:
+            self.shadow_toolcall_enabled = bool(shadow_toolcall)
+        self._set_shadow_toolcall_enabled(bool(self.shadow_toolcall_enabled))
+
+    def _snapshot_shadow_toolcall_counters(self) -> Dict[str, int]:
+        totals = {"steps": 0, "mismatch_count": 0, "error_count": 0}
+        for env_obj in self._iter_env_instances():
+            getter = getattr(env_obj, "get_shadow_toolcall_stats", None)
+            if not callable(getter):
+                continue
+            try:
+                stats = getter()
+            except Exception:
+                continue
+            if not isinstance(stats, dict):
+                continue
+            for key, src in (
+                ("steps", "steps"),
+                ("mismatch_count", "mismatch_count"),
+                ("error_count", "error_count"),
+            ):
+                try:
+                    totals[key] += int(stats.get(src, 0) or 0)
+                except Exception:
+                    continue
+        return totals
+
+    def _shadow_obspacket_roundtrip_obs(
+        self,
+        obs: Any,
+        *,
+        split: str,
+        step_id: int,
+    ) -> Tuple[int, int, int]:
+        if not bool(getattr(self, "shadow_obspacket_enabled", False)):
+            return 0, 0, 0
+        if not isinstance(obs, dict):
+            return 0, 0, 0
+        try:
+            patch_shape = (5, 5)
+            patch_raw = obs.get("patch")
+            if isinstance(patch_raw, np.ndarray) and patch_raw.ndim == 2:
+                patch_shape = (int(patch_raw.shape[0]), int(patch_raw.shape[1]))
+            action_mask = None
+            get_mask = getattr(self.env, "get_action_mask", None)
+            if callable(get_mask):
+                try:
+                    mask_raw = get_mask()
+                    if isinstance(mask_raw, np.ndarray):
+                        action_mask = mask_raw
+                except Exception:
+                    action_mask = None
+            packet = obs_to_packet(
+                obs,
+                episode_id="shadow",
+                step_id=int(step_id),
+                split=str(split),
+                action_mask=action_mask,
+            )
+            restored = packet_to_obs(packet, patch_shape=patch_shape)
+            mismatch = False
+            orig_patch = obs.get("patch")
+            restored_patch = restored.get("patch")
+            if not isinstance(orig_patch, np.ndarray) or not isinstance(restored_patch, np.ndarray):
+                mismatch = True
+            else:
+                orig_i64 = np.asarray(orig_patch, dtype=np.int64)
+                restored_i64 = np.asarray(restored_patch, dtype=np.int64)
+                if orig_i64.shape != restored_i64.shape or not np.array_equal(orig_i64, restored_i64):
+                    mismatch = True
+            energy = obs.get("energy")
+            if isinstance(energy, (int, float)):
+                restored_energy = restored.get("energy")
+                if not isinstance(restored_energy, (int, float)):
+                    mismatch = True
+                elif abs(float(energy) - float(restored_energy)) > 1e-6:
+                    mismatch = True
+            for key in ("scenario_id", "env_id"):
+                if key in obs:
+                    try:
+                        if int(obs.get(key, 0) or 0) != int(restored.get(key, 0) or 0):
+                            mismatch = True
+                    except Exception:
+                        mismatch = True
+            env_family = str(obs.get("env_family", "") or "")
+            if env_family and env_family != str(restored.get("env_family", "") or ""):
+                mismatch = True
+            return 1, int(mismatch), 0
+        except Exception:
+            return 1, 0, 1
 
     def _get_repo_expert_action(self) -> Optional[int]:
         env_inst = self._get_active_env_instance()
@@ -4794,7 +4923,20 @@ class Trainer:
         self.agent.policy.train()
         self.agent.value_model.train()
 
+        shadow_toolcall_start = self._snapshot_shadow_toolcall_counters()
+        shadow_obspacket_steps = 0
+        shadow_roundtrip_mismatch_count = 0
+        shadow_error_count = 0
+
         obs = self.env.reset(split="train")
+        shadow_step, shadow_mismatch, shadow_error = self._shadow_obspacket_roundtrip_obs(
+            obs,
+            split="train",
+            step_id=0,
+        )
+        shadow_obspacket_steps += int(shadow_step)
+        shadow_roundtrip_mismatch_count += int(shadow_mismatch)
+        shadow_error_count += int(shadow_error)
         patch_np = obs["patch"]
         energy = obs["energy"]
         scenario_id = int(obs.get("scenario_id", getattr(self.env, "current_scenario_id", 0)))
@@ -5130,6 +5272,14 @@ class Trainer:
             )
 
             next_obs, _, done, info = self.env.step(action.item())
+            shadow_step, shadow_mismatch, shadow_error = self._shadow_obspacket_roundtrip_obs(
+                next_obs,
+                split="train",
+                step_id=int(step_idx + 1),
+            )
+            shadow_obspacket_steps += int(shadow_step)
+            shadow_roundtrip_mismatch_count += int(shadow_mismatch)
+            shadow_error_count += int(shadow_error)
             flags = self._extract_contract_flags(info, done=bool(done))
             info = flags["normalized_info"]
             reward_env = self.compute_preference_reward(info)
@@ -5240,6 +5390,14 @@ class Trainer:
 
             if done and step_idx < n_steps:
                 obs = self.env.reset(split="train")
+                shadow_step, shadow_mismatch, shadow_error = self._shadow_obspacket_roundtrip_obs(
+                    obs,
+                    split="train",
+                    step_id=int(step_idx),
+                )
+                shadow_obspacket_steps += int(shadow_step)
+                shadow_roundtrip_mismatch_count += int(shadow_mismatch)
+                shadow_error_count += int(shadow_error)
                 patch_np = obs["patch"]
                 patch_t.copy_(torch.from_numpy(patch_np))
                 energy = obs["energy"]
@@ -5306,6 +5464,31 @@ class Trainer:
             self.last_invalid_action_rate = float(invalid_action_steps) / float(masked_decision_steps)
         else:
             self.last_invalid_action_rate = 0.0
+        shadow_toolcall_end = self._snapshot_shadow_toolcall_counters()
+        shadow_toolcall_steps = max(
+            0,
+            int(shadow_toolcall_end.get("steps", 0) or 0) - int(shadow_toolcall_start.get("steps", 0) or 0),
+        )
+        shadow_toolcall_mismatch = max(
+            0,
+            int(shadow_toolcall_end.get("mismatch_count", 0) or 0)
+            - int(shadow_toolcall_start.get("mismatch_count", 0) or 0),
+        )
+        shadow_toolcall_errors = max(
+            0,
+            int(shadow_toolcall_end.get("error_count", 0) or 0)
+            - int(shadow_toolcall_start.get("error_count", 0) or 0),
+        )
+        self.last_shadow_obspacket_steps = int(shadow_obspacket_steps)
+        self.last_shadow_toolcall_steps = int(shadow_toolcall_steps)
+        self.last_shadow_roundtrip_mismatch_count = int(
+            shadow_roundtrip_mismatch_count + shadow_toolcall_mismatch
+        )
+        self.last_shadow_error_count = int(shadow_error_count + shadow_toolcall_errors)
+        self.shadow_obspacket_steps += int(shadow_obspacket_steps)
+        self.shadow_toolcall_steps += int(shadow_toolcall_steps)
+        self.shadow_roundtrip_mismatch_count += int(self.last_shadow_roundtrip_mismatch_count)
+        self.shadow_error_count += int(self.last_shadow_error_count)
 
         return (
             actions_t,
@@ -5960,6 +6143,12 @@ class Trainer:
         stats["action_mask_dropout_prob_effective"] = float(mask_dropout_prob_eff)
         stats["action_mask_dropout_target"] = float(getattr(self, "action_mask_dropout_target", 0.0))
         stats["action_mask_dropout_warmup_updates"] = float(getattr(self, "action_mask_dropout_warmup_updates", 0))
+        stats["shadow_obspacket_steps"] = float(getattr(self, "last_shadow_obspacket_steps", 0))
+        stats["shadow_toolcall_steps"] = float(getattr(self, "last_shadow_toolcall_steps", 0))
+        stats["shadow_roundtrip_mismatch_count"] = float(
+            getattr(self, "last_shadow_roundtrip_mismatch_count", 0)
+        )
+        stats["shadow_error_count"] = float(getattr(self, "last_shadow_error_count", 0))
 
         self.update_memory_from_buffer(
             batch_size=32,
@@ -6876,9 +7065,21 @@ class Trainer:
             planner_reality_nstep_returns: List[float] = []
             planner_reality_planner_top1_matches: List[float] = []
             planner_reality_policy_top1_matches: List[float] = []
+            shadow_toolcall_start = self._snapshot_shadow_toolcall_counters()
+            shadow_obspacket_steps = 0
+            shadow_roundtrip_mismatch_count = 0
+            shadow_error_count = 0
 
             for _ in range(n_episodes):
                 obs = self.env.reset()
+                shadow_step, shadow_mismatch, shadow_error = self._shadow_obspacket_roundtrip_obs(
+                    obs,
+                    split="eval",
+                    step_id=0,
+                )
+                shadow_obspacket_steps += int(shadow_step)
+                shadow_roundtrip_mismatch_count += int(shadow_mismatch)
+                shadow_error_count += int(shadow_error)
                 scenario_name = getattr(
                     self.env, "current_scenario_name", obs.get("scenario_name", "single")
                 )
@@ -7114,6 +7315,14 @@ class Trainer:
                                     )
 
                     next_obs, _, done, info = self.env.step(action.item())
+                    shadow_step, shadow_mismatch, shadow_error = self._shadow_obspacket_roundtrip_obs(
+                        next_obs,
+                        split="eval",
+                        step_id=int(t + 1),
+                    )
+                    shadow_obspacket_steps += int(shadow_step)
+                    shadow_roundtrip_mismatch_count += int(shadow_mismatch)
+                    shadow_error_count += int(shadow_error)
                     flags = self._extract_contract_flags(info, done=bool(done))
                     info = flags["normalized_info"]
                     reward_env = self.compute_preference_reward(info)
@@ -7406,6 +7615,22 @@ class Trainer:
                         "std_return": s,
                         "n_episodes": len(vals),
                     }
+            shadow_toolcall_end = self._snapshot_shadow_toolcall_counters()
+            shadow_toolcall_steps = max(
+                0,
+                int(shadow_toolcall_end.get("steps", 0) or 0)
+                - int(shadow_toolcall_start.get("steps", 0) or 0),
+            )
+            shadow_toolcall_mismatch = max(
+                0,
+                int(shadow_toolcall_end.get("mismatch_count", 0) or 0)
+                - int(shadow_toolcall_start.get("mismatch_count", 0) or 0),
+            )
+            shadow_toolcall_errors = max(
+                0,
+                int(shadow_toolcall_end.get("error_count", 0) or 0)
+                - int(shadow_toolcall_start.get("error_count", 0) or 0),
+            )
 
             metrics = {
                 "use_self": bool(split_use_self),
@@ -7434,6 +7659,12 @@ class Trainer:
                 "train_std_return": train_std,
                 "test_mean_return": test_mean,
                 "test_std_return": test_std,
+                "shadow_obspacket_steps": int(shadow_obspacket_steps),
+                "shadow_toolcall_steps": int(shadow_toolcall_steps),
+                "shadow_roundtrip_mismatch_count": int(
+                    shadow_roundtrip_mismatch_count + shadow_toolcall_mismatch
+                ),
+                "shadow_error_count": int(shadow_error_count + shadow_toolcall_errors),
             }
             planner_summary = self._planner_debug_summary(
                 alpha_values=planner_alpha_vals,
@@ -7547,6 +7778,10 @@ class Trainer:
                 "planner_non_top1_nstep_mean",
                 "planner_top1_advantage_nstep",
                 "planner_regret_proxy_nstep",
+                "shadow_obspacket_steps",
+                "shadow_toolcall_steps",
+                "shadow_roundtrip_mismatch_count",
+                "shadow_error_count",
             ):
                 if key in unmasked:
                     results[f"unmasked_{key}"] = unmasked[key]

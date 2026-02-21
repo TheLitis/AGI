@@ -1541,6 +1541,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lagrangian-lr", type=float, default=0.01, help="Lagrange multiplier update learning rate.")
     parser.add_argument("--lagrangian-max", type=float, default=10.0, help="Upper cap for Lagrange multipliers.")
     parser.add_argument(
+        "--shadow-obspacket",
+        action="store_true",
+        help="Enable shadow obs->ObsPacket->obs roundtrip logging (policy path unchanged).",
+    )
+    parser.add_argument(
+        "--shadow-toolcall",
+        action="store_true",
+        help="Enable shadow int-action->ToolCallEnvelope->int-action roundtrip logging (repo env only).",
+    )
+    parser.add_argument(
         "--skill-mode",
         type=str,
         default="handcrafted",
@@ -1587,6 +1597,8 @@ def _run_suite(
     catastrophic_budget: float = 0.05,
     lagrangian_lr: float = 0.01,
     lagrangian_max: float = 10.0,
+    shadow_obspacket: bool = False,
+    shadow_toolcall: bool = False,
 ) -> Dict[str, Any]:
     if not isinstance(report.get("suites"), list):
         report["suites"] = []
@@ -1763,6 +1775,8 @@ def _run_suite(
             "catastrophic_budget": float(suite_catastrophic_budget),
             "lagrangian_lr": float(suite_lagrangian_lr),
             "lagrangian_max": float(suite_lagrangian_max),
+            "shadow_obspacket": bool(shadow_obspacket),
+            "shadow_toolcall": bool(shadow_toolcall),
             "run_self_reflection": bool(run_self_reflection),
             "run_stage3c": bool(run_stage3c),
             "run_lifecycle": bool(run_lifecycle),
@@ -1975,6 +1989,8 @@ def _run_suite(
                         repo_online_bc_coef=float(repo_online_bc_coef),
                         repo_bc_pretrain_episodes=int(repo_bc_episodes),
                         repo_bc_pretrain_max_steps=int(run_eval_max_steps),
+                        shadow_obspacket=bool(shadow_obspacket),
+                        shadow_toolcall=bool(shadow_toolcall),
                     )
                 except Exception as exc:
                     skip_reason = _optional_dependency_skip_reason(exc, str(case.env_type))
@@ -2585,6 +2601,8 @@ def main() -> int:
         "catastrophic_budget": float(args.catastrophic_budget),
         "lagrangian_lr": float(args.lagrangian_lr),
         "lagrangian_max": float(args.lagrangian_max),
+        "shadow_obspacket": bool(args.shadow_obspacket),
+        "shadow_toolcall": bool(args.shadow_toolcall),
         "force_cpu": bool(effective_force_cpu),
         "auto_force_cpu_repo": bool(auto_force_cpu_repo),
         "milestone_id": milestone_id,
@@ -2708,6 +2726,8 @@ def main() -> int:
                 catastrophic_budget=float(args.catastrophic_budget),
                 lagrangian_lr=float(args.lagrangian_lr),
                 lagrangian_max=float(args.lagrangian_max),
+                shadow_obspacket=bool(args.shadow_obspacket),
+                shadow_toolcall=bool(args.shadow_toolcall),
             )
     except KeyboardInterrupt:
         _save_report(report_path, report)

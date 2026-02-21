@@ -488,6 +488,8 @@ def run_experiment(
     checkpoint_save_optim: bool = True,
     deterministic_torch: bool = False,
     force_cpu: bool = False,
+    shadow_obspacket: bool = False,
+    shadow_toolcall: bool = False,
 ) -> Dict[str, Any]:
     """
     Run the staged training pipeline and return metrics.
@@ -549,7 +551,8 @@ def run_experiment(
         f"risk_shield={bool(enable_risk_shield)}, risk_tau={float(risk_shield_threshold):.3f}, "
         f"constrained_rl={bool(use_constrained_rl)}, "
         f"repo_bc_eps={int(max(0, repo_bc_pretrain_episodes))}, "
-        f"device={device}, force_cpu={force_cpu_flag}"
+        f"device={device}, force_cpu={force_cpu_flag}, "
+        f"shadow_obspacket={bool(shadow_obspacket)}, shadow_toolcall={bool(shadow_toolcall)}"
     )
 
     env_choice = (env_type or "gridworld").lower()
@@ -671,6 +674,8 @@ def run_experiment(
         catastrophic_budget=float(catastrophic_budget),
         lagrangian_lr=float(lagrangian_lr),
         lagrangian_max=float(lagrangian_max),
+        shadow_obspacket=bool(shadow_obspacket),
+        shadow_toolcall=bool(shadow_toolcall),
     )
 
     if resume_from:
@@ -1174,6 +1179,8 @@ def run_experiment(
             "train_latent_skills": bool(train_latent_flag),
             "deterministic_torch": bool(deterministic_torch),
             "force_cpu": bool(force_cpu_flag),
+            "shadow_obspacket": bool(shadow_obspacket),
+            "shadow_toolcall": bool(shadow_toolcall),
         },
     }
 

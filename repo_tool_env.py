@@ -29,7 +29,7 @@ import numpy as np
 
 from env import BaseEnv, build_env_descriptor
 from info_contract import normalize_info_contract
-from interface_adapters import tool_call_to_int_action
+from interface_adapters import int_action_to_tool_call, tool_call_to_int_action
 
 
 @dataclass
@@ -610,6 +610,10 @@ class RepoToolEnv(BaseEnv):
         self.last_pytest_timeout: bool = False
         self.workspace_dirty: bool = True
         self.action_mask_enabled: bool = True
+        self.shadow_toolcall_enabled: bool = False
+        self.shadow_toolcall_steps: int = 0
+        self.shadow_roundtrip_mismatch_count: int = 0
+        self.shadow_error_count: int = 0
         # Failure focus state (used for inspection/tool-loop support).
         self.focus_func: Optional[str] = None
         self.focus_file: Optional[str] = None
@@ -2016,6 +2020,24 @@ class RepoToolEnv(BaseEnv):
     def get_action_mask_enabled(self) -> bool:
         return bool(getattr(self, "action_mask_enabled", True))
 
+    def set_shadow_toolcall_enabled(self, enabled: bool) -> None:
+        self.shadow_toolcall_enabled = bool(enabled)
+
+    def get_shadow_toolcall_enabled(self) -> bool:
+        return bool(getattr(self, "shadow_toolcall_enabled", False))
+
+    def get_shadow_toolcall_stats(self, reset: bool = False) -> Dict[str, int]:
+        stats = {
+            "steps": int(getattr(self, "shadow_toolcall_steps", 0) or 0),
+            "mismatch_count": int(getattr(self, "shadow_roundtrip_mismatch_count", 0) or 0),
+            "error_count": int(getattr(self, "shadow_error_count", 0) or 0),
+        }
+        if bool(reset):
+            self.shadow_toolcall_steps = 0
+            self.shadow_roundtrip_mismatch_count = 0
+            self.shadow_error_count = 0
+        return stats
+
     def get_action_mask(self) -> np.ndarray:
         mask = np.ones((self.n_actions,), dtype=np.float32)
         cfg = self.config
@@ -2155,20 +2177,34 @@ class RepoToolEnv(BaseEnv):
         return self._get_obs(last_action=0)
 
     def step(self, action: Any) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
+        action_map = {
+            "repo.noop": 0,
+            "repo.apply_patch_0": 1,
+            "repo.apply_patch_1": 2,
+            "repo.run_tests": 3,
+            "repo.revert": 4,
+            "repo.cycle_patches": 5,
+        }
         action = tool_call_to_int_action(
             action,
-            tool_name_to_action={
-                "repo.noop": 0,
-                "repo.apply_patch_0": 1,
-                "repo.apply_patch_1": 2,
-                "repo.run_tests": 3,
-                "repo.revert": 4,
-                "repo.cycle_patches": 5,
-            },
+            tool_name_to_action=action_map,
             default_action=0,
         )
         if action < 0 or action >= self.n_actions:
             action = 0
+        if bool(getattr(self, "shadow_toolcall_enabled", False)):
+            self.shadow_toolcall_steps += 1
+            try:
+                envelope = int_action_to_tool_call(int(action))
+                roundtrip_action = tool_call_to_int_action(
+                    envelope,
+                    tool_name_to_action=action_map,
+                    default_action=0,
+                )
+                if int(roundtrip_action) != int(action):
+                    self.shadow_roundtrip_mismatch_count += 1
+            except Exception:
+                self.shadow_error_count += 1
 
         cfg = self.config
         toolloop = self._is_toolloop_task(self.current_task)
@@ -2338,6 +2374,11 @@ class RepoToolEnv(BaseEnv):
                 "remaining_steps": float(info.get("remaining_steps", 0) or 0),
                 "death_flag": float(death_flag),
                 "redundant_run_tests": float(bool(redundant_run_tests)),
+                "shadow_toolcall_steps": float(getattr(self, "shadow_toolcall_steps", 0) or 0),
+                "shadow_roundtrip_mismatch_count": float(
+                    getattr(self, "shadow_roundtrip_mismatch_count", 0) or 0
+                ),
+                "shadow_error_count": float(getattr(self, "shadow_error_count", 0) or 0),
             },
         )
 
