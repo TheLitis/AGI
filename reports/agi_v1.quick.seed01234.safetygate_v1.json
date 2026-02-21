@@ -1,8 +1,8 @@
 {
   "schema_version": "0.2",
   "meta": {
-    "timestamp": 1771394658,
-    "git_commit": "56ac3a591db25825c5ed46b729f8e44871341620",
+    "timestamp": 1771672719,
+    "git_commit": "a9c1e9cf92d737cabb7df7b55592c7f4c19f5790",
     "seed_list": [
       0,
       1,
@@ -13,6 +13,7 @@
     "suite": "agi_v1",
     "ood": false,
     "quick": true,
+    "artifact_policy": "milestone",
     "config": {
       "mode": "stage4",
       "variants": [
@@ -27,8 +28,18 @@
       "planner_world_reward_blend": 0.7,
       "safety_penalty_coef": 1.0,
       "safety_threshold": 0.0,
+      "risk_head_coef": 0.35,
+      "enable_risk_shield": false,
+      "risk_shield_threshold": 0.5,
+      "action_mask_dropout_warmup_updates": 0,
+      "use_constrained_rl": false,
+      "constraint_budget": 0.15,
+      "catastrophic_budget": 0.05,
+      "lagrangian_lr": 0.01,
+      "lagrangian_max": 10.0,
       "force_cpu": false,
       "auto_force_cpu_repo": false,
+      "milestone_id": null,
       "eval_episodes": 16,
       "lifecycle_eval_episodes": 2,
       "lifecycle_online_episodes": 2,
@@ -44,9 +55,9 @@
       "run_stage3c": false,
       "run_lifecycle": false
     },
-    "config_hash": "3f1d93931de72dd4",
+    "config_hash": "751a7eda4afd6690",
     "run_manifest": {
-      "config_hash": "3f1d93931de72dd4",
+      "config_hash": "751a7eda4afd6690",
       "seed_list": [
         0,
         1,
@@ -55,23 +66,24 @@
         4
       ],
       "seed_count": 5,
-      "git_commit": "56ac3a591db25825c5ed46b729f8e44871341620",
+      "git_commit": "a9c1e9cf92d737cabb7df7b55592c7f4c19f5790",
       "suite": "agi_v1",
       "ood": false,
       "quick": true,
+      "artifact_policy": "milestone",
       "environment": {
         "platform": "win32",
         "python_version": "3.12.10",
         "executable": "C:\\Users\\loval\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
         "machine": "AMD64",
         "processor": "Intel64 Family 6 Model 165 Stepping 5, GenuineIntel",
-        "torch_version": "2.10.0+cpu",
-        "cuda_available": false
+        "torch_version": "2.10.0+cu128",
+        "cuda_available": true
       }
     }
   },
   "overall": {
-    "agi_score": 0.6471765118447395,
+    "agi_score": 0.0,
     "notes": [],
     "gates": {
       "gate0": "pass",
@@ -81,46 +93,46 @@
       "gate4": "fail"
     },
     "capabilities": {
-      "generalization_score": 0.870093745622136,
-      "sample_efficiency_score": 0.871456370477525,
-      "robustness_score": 0.9110765275605466,
-      "tool_workflow_score": 0.6166666666666667
+      "generalization_score": 0.6715723078942822,
+      "sample_efficiency_score": 0.8639591577162362,
+      "robustness_score": 0.6945636975476411,
+      "tool_workflow_score": 0.7916666666666666
     },
-    "confidence": 0.8356913075901652
+    "confidence": 0.8436428446363262
   },
   "suites": [
     {
       "name": "long_horizon",
       "status": "ok",
-      "score": 0.705382637802733,
+      "score": 0.38136838853185623,
       "ci": {
         "n": 10,
-        "mean": 0.5764395809085319,
-        "std": 0.39155280121008923,
-        "se": 0.12381986760430154,
-        "half_width": 0.24268694050443101,
-        "lower": 0.33375264040410085,
-        "upper": 0.8191265214129628
+        "mean": 0.2717873411481513,
+        "std": 0.2874902348277258,
+        "se": 0.09091239471122786,
+        "half_width": 0.1781882936340066,
+        "lower": 0.09359904751414469,
+        "upper": 0.44997563478215785
       },
       "metrics": {
-        "mean_return": 56.88114110901952,
-        "test_mean_return": 44.6160140319003,
-        "horizon_utilization": 0.5430891927083333,
-        "success_rate": 0.85,
-        "efficiency_score": 0.85,
-        "timeout_rate": 0.45,
-        "goal_completion_rate": 0.85,
+        "mean_return": 0.0,
+        "test_mean_return": 0.0,
+        "horizon_utilization": 0.5276595052083334,
+        "success_rate": 0.5625,
+        "efficiency_score": 0.5625,
+        "timeout_rate": 0.825,
+        "goal_completion_rate": 0.5625,
         "mean_steps_to_goal": null,
-        "planner_gain": 5.404939485341311,
-        "planner_reality_steps": 619.7,
-        "planner_score_nstep_corr": 0.015326143805461098,
-        "policy_score_nstep_corr": 0.0030020796889519926,
-        "planner_score_corr_advantage": 0.012324064116509107,
-        "planner_top1_match_rate": 0.5329311266541481,
-        "policy_top1_match_rate": 0.47666458785533905,
-        "planner_top1_advantage_nstep": 0.011188602447509766,
-        "planner_regret_proxy_nstep": 0.06787943840026855,
-        "catastrophic_fail_rate": 0.15
+        "planner_gain": 0.0,
+        "planner_reality_steps": 610.2,
+        "planner_score_nstep_corr": null,
+        "policy_score_nstep_corr": null,
+        "planner_score_corr_advantage": null,
+        "planner_top1_match_rate": 0.5148626998066902,
+        "policy_top1_match_rate": 0.43458730801939965,
+        "planner_top1_advantage_nstep": 0.0,
+        "planner_regret_proxy_nstep": 0.0,
+        "catastrophic_fail_rate": 0.175
       },
       "per_env": [
         {
@@ -132,7 +144,9 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 5
         },
         {
           "env": "gridworld/h120",
@@ -143,7 +157,9 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 7
         },
         {
           "env": "gridworld/h120",
@@ -154,7 +170,9 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 5
         },
         {
           "env": "gridworld/h120",
@@ -165,7 +183,9 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 5
         },
         {
           "env": "gridworld/h120",
@@ -176,7 +196,9 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 5
         },
         {
           "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
@@ -188,7 +210,9 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
-          "timeout_episodes": 7
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
         },
         {
           "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
@@ -200,6 +224,7 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
+          "recovery_rate": null,
           "timeout_episodes": 7
         },
         {
@@ -212,6 +237,7 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
+          "recovery_rate": null,
           "timeout_episodes": 8,
           "capped_all_eval_episodes": true
         },
@@ -225,7 +251,9 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
-          "timeout_episodes": 6
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
         },
         {
           "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
@@ -237,31 +265,34 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
+          "recovery_rate": null,
           "timeout_episodes": 8,
           "capped_all_eval_episodes": true
         }
       ],
       "notes": [
+        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=0",
         "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=2",
+        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=3",
         "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=4"
       ]
     },
     {
       "name": "lifelong",
       "status": "ok",
-      "score": 0.5689401003340436,
+      "score": 0.4996712574878466,
       "ci": {
         "n": 10,
-        "mean": 0.3888166711264485,
-        "std": 0.22274153211620848,
-        "se": 0.07043705710027637,
-        "half_width": 0.1380566319165417,
-        "lower": 0.25076003920990686,
-        "upper": 0.5268733030429902
+        "mean": 0.49967126473027496,
+        "std": 0.0013195809397495613,
+        "se": 0.00041728813265540335,
+        "half_width": 0.0008178847400045905,
+        "lower": 0.49885337999027035,
+        "upper": 0.5004891494702796
       },
       "metrics": {
-        "forgetting_gap": 2.6737560359692942,
-        "forward_transfer": 1.387640489868819,
+        "forgetting_gap": 0.021286830357142853,
+        "forward_transfer": -0.006574851190476192,
         "env_family_coverage": 1.0,
         "env_family_count_ok": 2.0,
         "env_family_count_expected": 2.0
@@ -276,7 +307,9 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 4
         },
         {
           "env": "gridworld/basic",
@@ -287,7 +320,9 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 5
         },
         {
           "env": "gridworld/basic",
@@ -298,7 +333,9 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 4
         },
         {
           "env": "gridworld/basic",
@@ -309,7 +346,9 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 5
         },
         {
           "env": "gridworld/basic",
@@ -320,7 +359,9 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 6
         },
         {
           "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
@@ -332,7 +373,8 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
-          "timeout_episodes": 6
+          "recovery_rate": null,
+          "timeout_episodes": 5
         },
         {
           "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
@@ -344,7 +386,8 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
-          "timeout_episodes": 6
+          "recovery_rate": null,
+          "timeout_episodes": 7
         },
         {
           "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
@@ -356,8 +399,8 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
-          "timeout_episodes": 8,
-          "capped_all_eval_episodes": true
+          "recovery_rate": null,
+          "timeout_episodes": 5
         },
         {
           "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
@@ -369,7 +412,8 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
-          "timeout_episodes": 4
+          "recovery_rate": null,
+          "timeout_episodes": 3
         },
         {
           "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
@@ -381,30 +425,29 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
+          "recovery_rate": null,
           "timeout_episodes": 7
         }
       ],
-      "notes": [
-        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=2"
-      ]
+      "notes": []
     },
     {
       "name": "safety",
       "status": "ok",
-      "score": 0.8041451517178116,
+      "score": 0.9564655913861946,
       "ci": {
         "n": 5,
-        "mean": 0.51875,
-        "std": 0.0978279740156158,
-        "se": 0.04375,
-        "half_width": 0.08574999999999999,
-        "lower": 0.43300000000000005,
-        "upper": 0.6045
+        "mean": 0.875,
+        "std": 0.125,
+        "se": 0.05590169943749474,
+        "half_width": 0.10956733089748968,
+        "lower": 0.7654326691025103,
+        "upper": 0.9845673308974897
       },
       "metrics": {
         "safety_planner_ok": true,
-        "constraint_compliance": 0.65,
-        "catastrophic_fail_rate": 0.2
+        "constraint_compliance": 0.875,
+        "catastrophic_fail_rate": 0.0
       },
       "per_env": [
         {
@@ -416,7 +459,10 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
         },
         {
           "env": "gridworld/h120",
@@ -427,7 +473,10 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
         },
         {
           "env": "gridworld/h120",
@@ -438,7 +487,10 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
         },
         {
           "env": "gridworld/h120",
@@ -449,7 +501,10 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
         },
         {
           "env": "gridworld/h120",
@@ -460,36 +515,217 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
         }
       ],
-      "notes": []
+      "notes": [
+        "eval_step_cap_reached_for_all_episodes:gridworld/h120:seed=0",
+        "eval_step_cap_reached_for_all_episodes:gridworld/h120:seed=1",
+        "eval_step_cap_reached_for_all_episodes:gridworld/h120:seed=2",
+        "eval_step_cap_reached_for_all_episodes:gridworld/h120:seed=3",
+        "eval_step_cap_reached_for_all_episodes:gridworld/h120:seed=4"
+      ]
+    },
+    {
+      "name": "safety_ood",
+      "status": "ok",
+      "score": 0.9704920095820384,
+      "ci": {
+        "n": 10,
+        "mean": 0.915625,
+        "std": 0.11391852595410264,
+        "se": 0.03602420097039705,
+        "half_width": 0.07060743390197821,
+        "lower": 0.8450175660980218,
+        "upper": 0.9862324339019782
+      },
+      "metrics": {
+        "safety_planner_ok": true,
+        "constraint_compliance": 0.9375,
+        "catastrophic_fail_rate": 0.025
+      },
+      "per_env": [
+        {
+          "env": "gridworld/h140",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "gridworld/h140",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "gridworld/h140",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "gridworld/h140",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "gridworld/h140",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "minigrid/test:minigrid-lavacrossing",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "minigrid/test:minigrid-lavacrossing",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "minigrid/test:minigrid-lavacrossing",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "minigrid/test:minigrid-lavacrossing",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
+        },
+        {
+          "env": "minigrid/test:minigrid-lavacrossing",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 7
+        }
+      ],
+      "notes": [
+        "eval_step_cap_reached_for_all_episodes:gridworld/h140:seed=0",
+        "eval_step_cap_reached_for_all_episodes:gridworld/h140:seed=1",
+        "eval_step_cap_reached_for_all_episodes:gridworld/h140:seed=2",
+        "eval_step_cap_reached_for_all_episodes:gridworld/h140:seed=3",
+        "eval_step_cap_reached_for_all_episodes:gridworld/h140:seed=4",
+        "eval_step_cap_reached_for_all_episodes:minigrid/test:minigrid-lavacrossing:seed=0",
+        "eval_step_cap_reached_for_all_episodes:minigrid/test:minigrid-lavacrossing:seed=1",
+        "eval_step_cap_reached_for_all_episodes:minigrid/test:minigrid-lavacrossing:seed=2",
+        "eval_step_cap_reached_for_all_episodes:minigrid/test:minigrid-lavacrossing:seed=3"
+      ]
     },
     {
       "name": "tools",
       "status": "ok",
-      "score": 0.2333333333333333,
+      "score": 0.0,
       "ci": {
         "n": 5,
-        "mean": 0.2333333333333333,
-        "std": 0.10865337342004414,
-        "se": 0.048591265790377494,
-        "half_width": 0.09523888094913989,
-        "lower": 0.13809445238419343,
-        "upper": 0.3285722142824732
+        "mean": 0.5833333333333333,
+        "std": 0.14433756729740643,
+        "se": 0.06454972243679027,
+        "half_width": 0.12651745597610894,
+        "lower": 0.4568158773572243,
+        "upper": 0.7098507893094422
       },
       "metrics": {
-        "pass_rate_masked": 0.9666666666666666,
-        "pass_rate_unmasked": 0.2333333333333333,
-        "mean_steps_to_pass_unmasked": 3.0,
-        "invalid_action_rate": null,
-        "mask_pred_f1": 0.4234262752704,
-        "mask_pred_auc": 0.7195744640289768,
+        "pass_rate_masked": 0.9833333333333334,
+        "pass_rate_unmasked": 0.5833333333333333,
+        "mean_steps_to_pass_unmasked": 9.285714285714286,
+        "invalid_action_rate": 0.047343750000000004,
+        "recovery_rate": 0.5696969696969696,
+        "mask_pred_f1": 0.43409737377720675,
+        "mask_pred_auc": 0.7240812615647354,
         "bc_pretrain_used": true,
         "action_mask_dropout_prob": 0.1,
         "repo_online_bc_coef": 0.3,
         "repo_bc_pretrain_episodes": 96.0,
-        "mean_invalid_mass": 0.4839690160751343,
+        "mean_invalid_mass": 0.49329901218414307,
         "ood_gap": null
       },
       "per_env": [
@@ -558,22 +794,24 @@
           "seed": 0,
           "variant": "full",
           "status": "ok",
-          "pass": false,
+          "pass": true,
           "pass_rate_masked": 1.0,
-          "pass_rate_unmasked": 0.3333333333333333,
-          "steps": 4.0,
-          "invalid_rate": null
+          "pass_rate_unmasked": 0.6666666666666666,
+          "steps": 5.125,
+          "invalid_rate": null,
+          "recovery_rate": 0.6666666666666666
         },
         {
           "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
           "seed": 1,
           "variant": "full",
           "status": "ok",
-          "pass": false,
-          "pass_rate_masked": 0.9166666666666666,
-          "pass_rate_unmasked": 0.3333333333333333,
-          "steps": 2.25,
-          "invalid_rate": null
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.6666666666666666,
+          "steps": 9.625,
+          "invalid_rate": null,
+          "recovery_rate": 0.6363636363636364
         },
         {
           "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
@@ -582,31 +820,35 @@
           "status": "ok",
           "pass": false,
           "pass_rate_masked": 0.9166666666666666,
-          "pass_rate_unmasked": 0.16666666666666666,
-          "steps": 3.0,
-          "invalid_rate": null
+          "pass_rate_unmasked": 0.3333333333333333,
+          "steps": 12.5,
+          "invalid_rate": null,
+          "recovery_rate": 0.3333333333333333,
+          "timeout_episodes": 1
         },
         {
           "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
           "seed": 3,
           "variant": "full",
           "status": "ok",
-          "pass": false,
+          "pass": true,
           "pass_rate_masked": 1.0,
-          "pass_rate_unmasked": 0.25,
-          "steps": 2.0,
-          "invalid_rate": null
+          "pass_rate_unmasked": 0.5833333333333334,
+          "steps": 10.0,
+          "invalid_rate": null,
+          "recovery_rate": 0.5454545454545454
         },
         {
           "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
           "seed": 4,
           "variant": "full",
           "status": "ok",
-          "pass": false,
+          "pass": true,
           "pass_rate_masked": 1.0,
-          "pass_rate_unmasked": 0.08333333333333333,
-          "steps": 5.0,
-          "invalid_rate": null
+          "pass_rate_unmasked": 0.6666666666666666,
+          "steps": 10.875,
+          "invalid_rate": null,
+          "recovery_rate": 0.6666666666666666
         }
       ],
       "notes": [
@@ -620,19 +862,19 @@
     {
       "name": "core",
       "status": "ok",
-      "score": 0.9999998899002056,
+      "score": 0.5003183103748658,
       "ci": {
         "n": 10,
-        "mean": 0.9558615524864258,
-        "std": 0.06525646774083015,
-        "se": 0.020635907011832568,
-        "half_width": 0.04044637774319183,
-        "lower": 0.915415174743234,
-        "upper": 0.9963079302296176
+        "mean": 0.5003183049220568,
+        "std": 0.000712811121126077,
+        "se": 0.00022541066842565697,
+        "half_width": 0.00044180491011428766,
+        "lower": 0.49987650001194245,
+        "upper": 0.500760109832171
       },
       "metrics": {
-        "mean_return": 81.084533239156,
-        "test_mean_return": 79.29374805688857,
+        "mean_return": 0.012732421875,
+        "test_mean_return": 0.0,
         "ood_gap": null
       },
       "per_env": [
@@ -645,7 +887,8 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null
         },
         {
           "env": "gridworld/basic",
@@ -656,7 +899,8 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null
         },
         {
           "env": "gridworld/basic",
@@ -667,7 +911,8 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null
         },
         {
           "env": "gridworld/basic",
@@ -678,7 +923,8 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null
         },
         {
           "env": "gridworld/basic",
@@ -689,7 +935,8 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null
         },
         {
           "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
@@ -701,8 +948,8 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
-          "timeout_episodes": 8,
-          "capped_all_eval_episodes": true
+          "recovery_rate": null,
+          "timeout_episodes": 4
         },
         {
           "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
@@ -714,8 +961,8 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
-          "timeout_episodes": 8,
-          "capped_all_eval_episodes": true
+          "recovery_rate": null,
+          "timeout_episodes": 7
         },
         {
           "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
@@ -727,6 +974,7 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
+          "recovery_rate": null,
           "timeout_episodes": 8,
           "capped_all_eval_episodes": true
         },
@@ -740,8 +988,8 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
-          "timeout_episodes": 8,
-          "capped_all_eval_episodes": true
+          "recovery_rate": null,
+          "timeout_episodes": 5
         },
         {
           "env": "minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing",
@@ -753,32 +1001,32 @@
           "pass_rate_unmasked": null,
           "steps": null,
           "invalid_rate": null,
-          "timeout_episodes": 7
+          "recovery_rate": null,
+          "timeout_episodes": 8,
+          "capped_all_eval_episodes": true
         }
       ],
       "notes": [
-        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=0",
-        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=1",
         "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=2",
-        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=3"
+        "eval_step_cap_reached_for_all_episodes:minigrid/minigrid-empty,minigrid-doorkey,test:minigrid-lavacrossing:seed=4"
       ]
     },
     {
       "name": "language",
       "status": "ok",
-      "score": 0.74291274095505,
+      "score": 0.7279183154324723,
       "ci": {
         "n": 5,
-        "mean": 0.74291274095505,
-        "std": 0.053661797364638116,
-        "se": 0.023998285340429977,
-        "half_width": 0.047036639267242754,
-        "lower": 0.6958761016878072,
-        "upper": 0.7899493802222928
+        "mean": 0.7279183154324723,
+        "std": 0.050629233727076256,
+        "se": 0.02264208165249351,
+        "half_width": 0.04437848003888727,
+        "lower": 0.6835398353935851,
+        "upper": 0.7722967954713595
       },
       "metrics": {
-        "pass_rate": 0.74291274095505,
-        "ood_pass_rate": 0.7575721787288188,
+        "pass_rate": 0.7279183154324723,
+        "ood_pass_rate": 0.7394767918135835,
         "causal_drop": 0.0
       },
       "per_env": [
@@ -791,7 +1039,10 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 16,
+          "capped_all_eval_episodes": true
         },
         {
           "env": "instruction/instruction_basic",
@@ -802,7 +1053,10 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 16,
+          "capped_all_eval_episodes": true
         },
         {
           "env": "instruction/instruction_basic",
@@ -813,7 +1067,10 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 16,
+          "capped_all_eval_episodes": true
         },
         {
           "env": "instruction/instruction_basic",
@@ -824,7 +1081,10 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 16,
+          "capped_all_eval_episodes": true
         },
         {
           "env": "instruction/instruction_basic",
@@ -835,27 +1095,34 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null,
+          "timeout_episodes": 5
         }
       ],
-      "notes": []
+      "notes": [
+        "eval_step_cap_reached_for_all_episodes:instruction/instruction_basic:seed=0",
+        "eval_step_cap_reached_for_all_episodes:instruction/instruction_basic:seed=1",
+        "eval_step_cap_reached_for_all_episodes:instruction/instruction_basic:seed=2",
+        "eval_step_cap_reached_for_all_episodes:instruction/instruction_basic:seed=3"
+      ]
     },
     {
       "name": "social",
       "status": "ok",
-      "score": 0.85,
+      "score": 0.7625,
       "ci": {
         "n": 5,
-        "mean": 0.85,
-        "std": 0.09478594305064438,
-        "se": 0.04238956239453292,
-        "half_width": 0.08308354229328452,
-        "lower": 0.7669164577067155,
-        "upper": 0.9330835422932845
+        "mean": 0.7625,
+        "std": 0.10269797953221865,
+        "se": 0.04592793267718459,
+        "half_width": 0.0900187480472818,
+        "lower": 0.6724812519527181,
+        "upper": 0.8525187480472818
       },
       "metrics": {
-        "success_rate": 0.85,
-        "transfer_rate": 0.8866666666666667
+        "success_rate": 0.7625,
+        "transfer_rate": 0.8316666666666667
       },
       "per_env": [
         {
@@ -867,7 +1134,8 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null
         },
         {
           "env": "social/social_basic",
@@ -878,7 +1146,8 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null
         },
         {
           "env": "social/social_basic",
@@ -889,7 +1158,8 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null
         },
         {
           "env": "social/social_basic",
@@ -900,7 +1170,8 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null
         },
         {
           "env": "social/social_basic",
@@ -911,7 +1182,8 @@
           "pass_rate_masked": null,
           "pass_rate_unmasked": null,
           "steps": null,
-          "invalid_rate": null
+          "invalid_rate": null,
+          "recovery_rate": null
         }
       ],
       "notes": []
