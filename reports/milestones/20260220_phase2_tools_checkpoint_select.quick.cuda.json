@@ -1,0 +1,263 @@
+{
+  "schema_version": "0.2",
+  "meta": {
+    "timestamp": 1771584634,
+    "git_commit": "f2839b5a7cf468cd2fd99b0b593b23e21504d187",
+    "seed_list": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "suite": "tools",
+    "ood": false,
+    "quick": true,
+    "artifact_policy": "milestone",
+    "config": {
+      "mode": "stage4",
+      "variants": [
+        "full"
+      ],
+      "use_skills": false,
+      "skill_mode": "handcrafted",
+      "n_latent_skills": 0,
+      "masked_only": false,
+      "unmasked_only": false,
+      "eval_max_steps": 200,
+      "planner_world_reward_blend": 0.7,
+      "safety_penalty_coef": 1.0,
+      "safety_threshold": 0.0,
+      "risk_head_coef": 0.1,
+      "enable_risk_shield": false,
+      "risk_shield_threshold": 0.8,
+      "action_mask_dropout_warmup_updates": 0,
+      "use_constrained_rl": false,
+      "constraint_budget": 0.15,
+      "catastrophic_budget": 0.05,
+      "lagrangian_lr": 0.01,
+      "lagrangian_max": 10.0,
+      "force_cpu": false,
+      "auto_force_cpu_repo": false,
+      "milestone_id": null,
+      "eval_episodes": 12,
+      "lifecycle_eval_episodes": 2,
+      "lifecycle_online_episodes": 2,
+      "self_model_batches": 20,
+      "self_reflection_batches": 5,
+      "stage3c_batches": 5,
+      "stage3c_collect_episodes": 2,
+      "n_steps": 256,
+      "stage2_updates": 3,
+      "stage4_updates": 5,
+      "eval_policy": "sample",
+      "run_self_reflection": false,
+      "run_stage3c": false,
+      "run_lifecycle": false
+    },
+    "config_hash": "66dbe22ba679df50",
+    "run_manifest": {
+      "config_hash": "66dbe22ba679df50",
+      "seed_list": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "seed_count": 5,
+      "git_commit": "f2839b5a7cf468cd2fd99b0b593b23e21504d187",
+      "suite": "tools",
+      "ood": false,
+      "quick": true,
+      "artifact_policy": "milestone",
+      "environment": {
+        "platform": "win32",
+        "python_version": "3.12.10",
+        "executable": "C:\\Users\\loval\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "machine": "AMD64",
+        "processor": "Intel64 Family 6 Model 165 Stepping 5, GenuineIntel",
+        "torch_version": "2.10.0+cu128",
+        "cuda_available": true
+      }
+    }
+  },
+  "overall": {
+    "agi_score": 0.0,
+    "notes": [],
+    "gates": {
+      "gate0": "pass",
+      "gate1": "na",
+      "gate2": "na",
+      "gate3": "na",
+      "gate4": "na"
+    },
+    "capabilities": {
+      "generalization_score": null,
+      "sample_efficiency_score": null,
+      "robustness_score": null,
+      "tool_workflow_score": null
+    },
+    "confidence": null
+  },
+  "suites": [
+    {
+      "name": "tools",
+      "status": "ok",
+      "score": 0.0,
+      "ci": {
+        "n": 5,
+        "mean": 0.6166666666666666,
+        "std": 0.07453559924999296,
+        "se": 0.03333333333333332,
+        "half_width": 0.0653333333333333,
+        "lower": 0.5513333333333332,
+        "upper": 0.6819999999999999
+      },
+      "metrics": {
+        "pass_rate_masked": 1.0,
+        "pass_rate_unmasked": 0.6166666666666666,
+        "mean_steps_to_pass_unmasked": 12.216216216216216,
+        "invalid_action_rate": 0.045625,
+        "recovery_rate": 0.6090909090909091,
+        "mask_pred_f1": 0.4131334779227302,
+        "mask_pred_auc": 0.7254956345397406,
+        "bc_pretrain_used": true,
+        "action_mask_dropout_prob": 0.1,
+        "repo_online_bc_coef": 0.3,
+        "repo_bc_pretrain_episodes": 96.0,
+        "mean_invalid_mass": 0.48773403286933903,
+        "ood_gap": null
+      },
+      "per_env": [
+        {
+          "env": "tool_env/basic",
+          "seed": 0,
+          "variant": "full",
+          "status": "skipped",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "error": "quick_skip_tools_basic_case"
+        },
+        {
+          "env": "tool_env/basic",
+          "seed": 1,
+          "variant": "full",
+          "status": "skipped",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "error": "quick_skip_tools_basic_case"
+        },
+        {
+          "env": "tool_env/basic",
+          "seed": 2,
+          "variant": "full",
+          "status": "skipped",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "error": "quick_skip_tools_basic_case"
+        },
+        {
+          "env": "tool_env/basic",
+          "seed": 3,
+          "variant": "full",
+          "status": "skipped",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "error": "quick_skip_tools_basic_case"
+        },
+        {
+          "env": "tool_env/basic",
+          "seed": 4,
+          "variant": "full",
+          "status": "skipped",
+          "pass": null,
+          "pass_rate_masked": null,
+          "pass_rate_unmasked": null,
+          "steps": null,
+          "invalid_rate": null,
+          "error": "quick_skip_tools_basic_case"
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 0,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.6666666666666666,
+          "steps": 10.75,
+          "invalid_rate": null,
+          "recovery_rate": 0.6666666666666666
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 1,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.6666666666666666,
+          "steps": 13.875,
+          "invalid_rate": null,
+          "recovery_rate": 0.6666666666666666
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 2,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.5,
+          "steps": 13.166666666666666,
+          "invalid_rate": null,
+          "recovery_rate": 0.5
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 3,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.5833333333333334,
+          "steps": 12.714285714285714,
+          "invalid_rate": null,
+          "recovery_rate": 0.5454545454545454
+        },
+        {
+          "env": "repo_tool_env/train:proc_mixed_loop,test:proc_mixed_loop",
+          "seed": 4,
+          "variant": "full",
+          "status": "ok",
+          "pass": true,
+          "pass_rate_masked": 1.0,
+          "pass_rate_unmasked": 0.6666666666666666,
+          "steps": 10.875,
+          "invalid_rate": null,
+          "recovery_rate": 0.6666666666666666
+        }
+      ],
+      "notes": [
+        "quick_skip_tools_basic_case",
+        "quick_skip_tools_basic_case",
+        "quick_skip_tools_basic_case",
+        "quick_skip_tools_basic_case",
+        "quick_skip_tools_basic_case"
+      ]
+    }
+  ]
+}
