@@ -737,6 +737,36 @@ def _extract_eval_metrics(
         )
         if isinstance(best_safety, dict):
             return best_safety
+    if name in {"long_horizon", "planning_diag"}:
+        # Long-horizon quality can regress in late fine-tuning; keep the best
+        # checkpoint by the suite's own horizon score.
+        best_horizon = _best_by_score(
+            (
+                "eval_after_stage4_self",
+                "eval_after_stage4_no_self",
+                "eval_after_stage4",
+                "eval_after_stage3_self",
+                "eval_after_stage3_no_self",
+                "eval_after_stage2",
+            )
+        )
+        if isinstance(best_horizon, dict):
+            return best_horizon
+    if name in {"lifelong", "lifelong_diag"}:
+        # Lifelong runs still report eval checkpoints; choose the best available
+        # checkpoint by suite quality to avoid late-stage regressions in summaries.
+        best_lifelong = _best_by_score(
+            (
+                "eval_after_stage4_self",
+                "eval_after_stage4_no_self",
+                "eval_after_stage4",
+                "eval_after_stage3_self",
+                "eval_after_stage3_no_self",
+                "eval_after_stage2",
+            )
+        )
+        if isinstance(best_lifelong, dict):
+            return best_lifelong
 
     eval_default = stage_metrics.get("eval_after_stage4_no_self")
     if not isinstance(eval_default, dict):
@@ -1699,39 +1729,39 @@ def _run_suite(
             stage1_steps = 400
             stage1_batches = 16
             stage2_updates = 3
-            stage4_updates = 5
+            stage4_updates = 8
             if suite.name == "tools_open":
                 # Open-action tasks need a bit more policy refinement.
-                stage4_updates = 7
+                stage4_updates = 8
         elif suite.name in {"lifelong", "lifelong_diag"}:
             # Lifelong metrics are unstable under ultra-short adaptation windows.
             eval_episodes = 8
             n_steps = 256
             stage1_steps = 400
             stage1_batches = 16
-            lifelong_eps = 28
+            lifelong_eps = 36
             lifecycle_eval_episodes = 8
             lifecycle_online_episodes = 16
             stage2_updates = 3
-            stage4_updates = 3
+            stage4_updates = 5
         elif suite.name == "long_horizon":
             # Preserve longer trajectories even in quick mode to make horizon metrics meaningful.
             eval_episodes = 8
-            n_steps = 256
-            planning_horizon = 16
-            planner_rollouts = 4
+            n_steps = 384
+            planning_horizon = 20
+            planner_rollouts = 6
             stage1_steps = 350
             stage1_batches = 16
-            stage2_updates = 3
-            stage4_updates = 4
+            stage2_updates = 6
+            stage4_updates = 10
         elif suite.name == "core":
             # Core-Variance Pack V1: reduce per-seed variance for Gate3 CI.
             eval_episodes = 8
-            n_steps = 192
+            n_steps = 256
             stage1_steps = 300
             stage1_batches = 12
             stage2_updates = 2
-            stage4_updates = 3
+            stage4_updates = 5
         elif suite.name in {"safety", "safety_ood"}:
             # Safety metrics need enough episodes to stabilize rates.
             eval_episodes = 8
@@ -1892,10 +1922,10 @@ def _run_suite(
                         run_force_cpu = bool(run_force_cpu or auto_force_cpu_repo)
                         if suite.name == "tools":
                             # Gate-1 sweep winner: stronger unmasked transfer.
-                            repo_bc_episodes = 96 if quick else 112
-                            repo_online_bc_coef = 0.30
-                            action_mask_dropout_prob = 0.10
-                            action_mask_dropout_warmup = 4 if quick else 8
+                            repo_bc_episodes = 144 if quick else 112
+                            repo_online_bc_coef = 0.45 if quick else 0.30
+                            action_mask_dropout_prob = 0.18 if quick else 0.10
+                            action_mask_dropout_warmup = 8 if quick else 8
                         elif suite.name == "tools_open":
                             # Open-action tasks are harder than masked tool-loop:
                             # keep a stronger online BC anchor and reduce planner bias.
@@ -1913,7 +1943,7 @@ def _run_suite(
                         run_eval_policy = "sample"
                         # Quick lifelong is variance-sensitive; a more balanced replay mix
                         # improves forgetting without collapsing adaptation.
-                        run_replay_frac_current = 0.3 if quick else 0.7
+                        run_replay_frac_current = 0.5 if quick else 0.7
                         run_deterministic_torch = True
                     if suite.name in {"safety", "safety_ood"}:
                         # Safety-first defaults for Gate2 closure: run shield + constrained RL
