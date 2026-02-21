@@ -1,6 +1,6 @@
 ﻿# ROADMAP v2: Gate-Driven AGI-Ready Program
 
-Updated: 2026-02-18
+Updated: 2026-02-21
 
 ## 1. Goal
 - Maintain a reproducible AGI-ready research contour with measurable criteria across all 8 technical mountains.
@@ -8,31 +8,31 @@ Updated: 2026-02-18
 - Enforce safety as a blocking condition for higher gates (not a soft side-metric).
 
 ## 2. Current Snapshot (Fact)
-- Primary reference report: `reports/agi_v1.quick.seed01234.safetygate_v1.json`.
+- Primary reference report: `reports/milestones/20260220_phase3_gate2_snapshot.quick.cuda.json`.
 - Current gates:
   - `gate0=pass`
   - `gate1=fail`
   - `gate2=fail`
   - `gate3=fail`
   - `gate4=fail`
-- Canonical safety cutover state:
-  - `overall.confidence = 0.8357`
-  - `generalization_score = 0.8701`
-  - `sample_efficiency_score = 0.8715`
-  - `robustness_score = 0.9111`
-  - `tool_workflow_score = 0.6167`
+- Canonical quick state:
+  - `overall.confidence = 0.8436`
+  - `generalization_score = 0.6716`
+  - `sample_efficiency_score = 0.8640`
+  - `robustness_score = 0.6946`
+  - `tool_workflow_score = 0.7917`
 - Canonical suite snapshot:
-  - `long_horizon.score = 0.7054` (`ci.half_width = 0.2427`, `catastrophic_fail_rate = 0.15`)
-  - `lifelong.score = 0.5689` (`forgetting_gap = 2.6738`, `forward_transfer = 1.3876`, `ci.half_width = 0.1381`)
-  - `safety.score = 0.8041` (`constraint_compliance = 0.65`, `catastrophic_fail_rate = 0.20`, `ci.half_width = 0.0858`)
-  - `tools.score = 0.2333` (`pass_rate_unmasked = 0.2333`, `mean_steps_to_pass_unmasked = 3.0`, `ci.half_width = 0.0952`)
-  - `core.score = 1.0000` (`ci.half_width = 0.0404`)
-  - `language.score = 0.7429` (`causal_drop = 0.0`, `ci.half_width = 0.0470`)
-  - `social.score = 0.8500` (`transfer_rate = 0.8867`, `ci.half_width = 0.0831`)
-- Restored safety artifact:
-  - `reports/bench_safety_quick_seed01234.autonomy4.json`
-  - `constraint_compliance = 0.65`
-  - `catastrophic_fail_rate = 0.20`
+  - `long_horizon.score = 0.3814` (`catastrophic_fail_rate = 0.1750`, `ci.half_width = 0.1782`)
+  - `lifelong.score = 0.4997` (`forgetting_gap = 0.0213`, `forward_transfer = -0.0066`, `ci.half_width = 0.0008`)
+  - `safety.score = 0.9565` (`constraint_compliance = 0.8750`, `catastrophic_fail_rate = 0.0000`, `ci.half_width = 0.1096`)
+  - `safety_ood.score = 0.9705` (`constraint_compliance = 0.9375`, `catastrophic_fail_rate = 0.0250`, `ci.half_width = 0.0706`)
+  - `tools.score = 0.0000` (`pass_rate_unmasked = 0.5833`, `mean_steps_to_pass_unmasked = 9.2857`, `invalid_action_rate = 0.0473`, `ci.half_width = 0.1265`)
+  - `core.score = 0.5003` (`ci.half_width = 0.0004`)
+  - `language.score = 0.7279` (`causal_drop = 0.0`, `ci.half_width = 0.0444`)
+  - `social.score = 0.7625` (`transfer_rate = 0.8317`, `ci.half_width = 0.0900`)
+- Dedicated safety milestone artifacts:
+  - `reports/milestones/20260220_phase1_safety_checkpoint_select.quick.cuda.json` (`compliance = 0.8750`, `catastrophic = 0.0000`)
+  - `reports/milestones/20260220_phase1_safety_ood_checkpoint_select.quick.cuda.json` (`compliance = 0.9375`, `catastrophic = 0.0250`)
 - Internal Gate2-Strict mountain opener (isolated reports) remains open:
   - `python scripts/check_mountains_open.py --long-horizon-report reports/bench_long_horizon_quick_seed01234.p0s2_rewardaware.json --lifelong-report reports/bench_lifelong_quick_seed01234.p0s2_rewardaware.json`
   - result: `[OPEN]`
@@ -103,7 +103,8 @@ Status: active and healthy.
 ### Phase B (Close Gate2)
 Status: reopened under safety-blocking cutover.
 - Prior Gate2 pass is superseded by stricter safety-blocking policy.
-- Current blockers: tool workflow pass-rate and safety compliance/catastrophic thresholds.
+- Safety blockers on canonical quick are now closed (`safety` + `safety_ood` pass thresholds).
+- Current blockers: `core.score`, `long_horizon.score`, `tools.pass_rate_unmasked`, and `lifelong.forward_transfer`.
 
 ### Phase C (Close Gate3)
 Status: blocked by Gate2 failure.
