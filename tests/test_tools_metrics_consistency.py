@@ -104,3 +104,45 @@ def test_extract_eval_metrics_safety_prefers_best_safety_checkpoint():
     # stage3_no_self has the best (compliance - catastrophic) quality.
     assert float(selected.get("constraint_compliance")) == 0.82
     assert float(selected.get("catastrophic_fail_rate")) == 0.0
+
+
+def test_extract_eval_metrics_long_horizon_prefers_best_checkpoint():
+    run_result = {
+        "stage_metrics": {
+            "eval_after_stage2": {
+                "mean_return": 9.0,
+                "mean_length": 110.0,
+                "max_steps": 120,
+                "timeout_rate": 0.0,
+            },
+            "eval_after_stage4_no_self": {
+                "mean_return": 1.0,
+                "mean_length": 20.0,
+                "max_steps": 120,
+                "timeout_rate": 0.8,
+            },
+            "eval_after_stage4_self": {
+                "mean_return": 0.5,
+                "mean_length": 15.0,
+                "max_steps": 120,
+                "timeout_rate": 0.9,
+            },
+        }
+    }
+    selected = bench._extract_eval_metrics(run_result, suite_name="long_horizon")
+    assert isinstance(selected, dict)
+    assert float(selected.get("mean_return")) == 9.0
+    assert float(selected.get("mean_length")) == 110.0
+
+
+def test_extract_eval_metrics_lifelong_prefers_best_checkpoint():
+    run_result = {
+        "stage_metrics": {
+            "eval_after_stage2": {"mean_return": 4.0},
+            "eval_after_stage4_no_self": {"mean_return": 1.0},
+            "eval_after_stage4_self": {"mean_return": 2.0},
+        }
+    }
+    selected = bench._extract_eval_metrics(run_result, suite_name="lifelong")
+    assert isinstance(selected, dict)
+    assert float(selected.get("mean_return")) == 4.0
