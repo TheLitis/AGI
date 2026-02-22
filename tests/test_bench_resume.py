@@ -114,3 +114,89 @@ def test_main_resume_skips_completed_suite(tmp_path, monkeypatch):
     assert len(second_safety) == 1
     assert second_safety[0]["status"] == "ok"
     assert calls == ["gridworld", "gridworld"]
+
+
+def test_run_suite_resume_continues_from_run_cache(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_run_experiment(**kwargs):
+        calls.append((kwargs.get("env_type"), kwargs.get("run_id")))
+        return {
+            "stage_metrics": {
+                "eval_after_stage4_self": {
+                    "mean_return": 0.5,
+                    "test_mean_return": 0.4,
+                }
+            },
+            "config": {},
+        }
+
+    monkeypatch.setattr(bench, "run_experiment", fake_run_experiment)
+
+    suite = bench.SuiteSpec(
+        name="core",
+        cases=[
+            bench.BenchCase(name="grid_a", env_type="gridworld"),
+            bench.BenchCase(name="grid_b", env_type="gridworld"),
+        ],
+        implemented=True,
+    )
+    report = {
+        "meta": {"config": {}},
+        "suites": [
+            {
+                "name": "core",
+                "status": "running",
+                "score": None,
+                "ci": None,
+                "metrics": {},
+                "per_env": [
+                    {
+                        "env": "gridworld/basic",
+                        "seed": 0,
+                        "variant": "full",
+                        "status": "ok",
+                    }
+                ],
+                "notes": [],
+                "run_cache": [
+                    {
+                        "case": {"name": "grid_a", "env_type": "gridworld"},
+                        "variant": "full",
+                        "seed": 0,
+                        "status": "ok",
+                        "eval": {"mean_return": 1.0, "test_mean_return": 1.0},
+                        "result": {"stage_metrics": {"eval_after_stage4_self": {"mean_return": 1.0}}},
+                    }
+                ],
+            }
+        ],
+    }
+    report_path = Path(tmp_path) / "resume_suite_report.json"
+
+    result = bench._run_suite(
+        suite,
+        seeds=[0],
+        variants=["full"],
+        mode="stage4",
+        quick=True,
+        quick_stub=False,
+        log_dir=str(tmp_path / "logs"),
+        use_skills=False,
+        skill_mode="handcrafted",
+        n_latent_skills=0,
+        masked_only=False,
+        unmasked_only=False,
+        eval_max_steps=64,
+        force_cpu=True,
+        auto_force_cpu_repo=True,
+        report=report,
+        report_path=report_path,
+        resume_suite=True,
+    )
+
+    assert result["status"] == "ok"
+    # only missing case (grid_b) should be executed
+    assert len(calls) == 1
+    assert "grid_b" in str(calls[0][1])
+    assert "run_cache" not in result

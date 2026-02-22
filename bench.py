@@ -1629,12 +1629,55 @@ def _run_suite(
     lagrangian_max: float = 10.0,
     shadow_obspacket: bool = False,
     shadow_toolcall: bool = False,
+    resume_suite: bool = False,
 ) -> Dict[str, Any]:
     if not isinstance(report.get("suites"), list):
         report["suites"] = []
-    report["suites"] = [
-        s for s in report["suites"] if not (isinstance(s, dict) and s.get("name") == suite.name)
-    ]
+
+    def _case_to_cache_dict(case_obj: BenchCase) -> Dict[str, Any]:
+        return {
+            "name": str(case_obj.name),
+            "env_type": str(case_obj.env_type),
+            "minigrid_scenarios": list(case_obj.minigrid_scenarios) if case_obj.minigrid_scenarios else None,
+            "computer_scenarios": list(case_obj.computer_scenarios) if case_obj.computer_scenarios else None,
+            "repo_scenarios": list(case_obj.repo_scenarios) if case_obj.repo_scenarios else None,
+            "max_steps_env": int(case_obj.max_steps_env) if isinstance(case_obj.max_steps_env, int) else None,
+            "max_energy_env": int(case_obj.max_energy_env) if isinstance(case_obj.max_energy_env, int) else None,
+        }
+
+    def _case_from_cache_dict(payload: Dict[str, Any]) -> Optional[BenchCase]:
+        if not isinstance(payload, dict):
+            return None
+        name = str(payload.get("name", "") or "").strip()
+        env_type = str(payload.get("env_type", "") or "").strip()
+        if not name or not env_type:
+            return None
+        max_steps_env = payload.get("max_steps_env")
+        max_energy_env = payload.get("max_energy_env")
+        if not isinstance(max_steps_env, int):
+            max_steps_env = None
+        if not isinstance(max_energy_env, int):
+            max_energy_env = None
+        return BenchCase(
+            name=name,
+            env_type=env_type,
+            minigrid_scenarios=payload.get("minigrid_scenarios"),
+            computer_scenarios=payload.get("computer_scenarios"),
+            repo_scenarios=payload.get("repo_scenarios"),
+            max_steps_env=max_steps_env,
+            max_energy_env=max_energy_env,
+        )
+
+    def _run_key(case_obj: BenchCase, variant: str, seed: int) -> Tuple[str, str, str, int]:
+        return (str(case_obj.env_type), str(case_obj.name), str(variant), int(seed))
+
+    existing_suite_entry: Optional[Dict[str, Any]] = None
+    for entry in report["suites"]:
+        if isinstance(entry, dict) and str(entry.get("name", "")) == suite.name:
+            existing_suite_entry = entry
+            break
+    report["suites"] = [s for s in report["suites"] if s is not existing_suite_entry]
+
     suite_result: Dict[str, Any] = {
         "name": suite.name,
         "status": "running",
@@ -1643,7 +1686,34 @@ def _run_suite(
         "metrics": _metric_template(suite.name),
         "per_env": [],
         "notes": [],
+        "run_cache": [],
     }
+    preloaded_records: List[Dict[str, Any]] = []
+    if bool(resume_suite) and isinstance(existing_suite_entry, dict):
+        prev_notes = existing_suite_entry.get("notes")
+        prev_per_env = existing_suite_entry.get("per_env")
+        prev_cache = existing_suite_entry.get("run_cache")
+        if isinstance(prev_notes, list):
+            suite_result["notes"] = [str(x) for x in prev_notes]
+        if isinstance(prev_per_env, list):
+            suite_result["per_env"] = [x for x in prev_per_env if isinstance(x, dict)]
+        if isinstance(prev_cache, list):
+            for item in prev_cache:
+                if not isinstance(item, dict):
+                    continue
+                case_obj = _case_from_cache_dict(item.get("case", {}))
+                if case_obj is None:
+                    continue
+                preloaded_records.append(
+                    {
+                        "case": case_obj,
+                        "variant": str(item.get("variant", "full")),
+                        "seed": int(item.get("seed", 0)),
+                        "result": item.get("result") if isinstance(item.get("result"), dict) else {},
+                        "eval": item.get("eval") if isinstance(item.get("eval"), dict) else {},
+                        "status": str(item.get("status", "error")),
+                    }
+                )
     report["suites"].append(suite_result)
     _save_report(report_path, report)
     safety_smoke_metrics = _run_safety_smoke() if suite.name in {"safety", "safety_ood"} else {}
@@ -1775,7 +1845,33 @@ def _run_suite(
         # Tool benchmarks are stochastic; sampled eval avoids brittle greedy collapse.
         eval_policy = "sample"
 
-    run_records: List[Dict[str, Any]] = []
+    run_records: List[Dict[str, Any]] = list(preloaded_records)
+    completed_run_keys: set[Tuple[str, str, str, int]] = set()
+    for record in run_records:
+        case_obj = record.get("case")
+        if not isinstance(case_obj, BenchCase):
+            continue
+        status_norm = str(record.get("status", "")).strip().lower()
+        if status_norm in {"ok", "error", "timeout", "skipped"}:
+            completed_run_keys.add(
+                _run_key(
+                    case_obj,
+                    str(record.get("variant", "full")),
+                    int(record.get("seed", 0)),
+                )
+            )
+    suite_result["run_cache"] = [
+        {
+            "case": _case_to_cache_dict(record["case"]),
+            "variant": str(record.get("variant", "full")),
+            "seed": int(record.get("seed", 0)),
+            "status": str(record.get("status", "error")),
+            "eval": record.get("eval") if isinstance(record.get("eval"), dict) else {},
+            "result": record.get("result") if isinstance(record.get("result"), dict) else {},
+        }
+        for record in run_records
+        if isinstance(record.get("case"), BenchCase)
+    ]
     any_error = False
     any_timeout = False
 
@@ -1819,6 +1915,9 @@ def _run_suite(
     for case in suite.cases:
         for variant in variants:
             for seed in seeds:
+                run_key = _run_key(case, str(variant), int(seed))
+                if run_key in completed_run_keys:
+                    continue
                 if quick and suite.name == "tools" and str(case.env_type) == "tools":
                     suite_result["notes"].append("quick_skip_tools_basic_case")
                     suite_result["per_env"].append(
@@ -1845,6 +1944,19 @@ def _run_suite(
                             "status": "skipped",
                         }
                     )
+                    completed_run_keys.add(run_key)
+                    suite_result["run_cache"] = [
+                        {
+                            "case": _case_to_cache_dict(record["case"]),
+                            "variant": str(record.get("variant", "full")),
+                            "seed": int(record.get("seed", 0)),
+                            "status": str(record.get("status", "error")),
+                            "eval": record.get("eval") if isinstance(record.get("eval"), dict) else {},
+                            "result": record.get("result") if isinstance(record.get("result"), dict) else {},
+                        }
+                        for record in run_records
+                        if isinstance(record.get("case"), BenchCase)
+                    ]
                     _save_report(report_path, report)
                     continue
                 run_id = f"bench_{suite.name}_{case.name}_{variant}_seed{seed}"
@@ -2082,6 +2194,19 @@ def _run_suite(
                         "status": status,
                     }
                 )
+                completed_run_keys.add(run_key)
+                suite_result["run_cache"] = [
+                    {
+                        "case": _case_to_cache_dict(record["case"]),
+                        "variant": str(record.get("variant", "full")),
+                        "seed": int(record.get("seed", 0)),
+                        "status": str(record.get("status", "error")),
+                        "eval": record.get("eval") if isinstance(record.get("eval"), dict) else {},
+                        "result": record.get("result") if isinstance(record.get("result"), dict) else {},
+                    }
+                    for record in run_records
+                    if isinstance(record.get("case"), BenchCase)
+                ]
                 _save_report(report_path, report)
 
     metrics = _metric_template(suite.name)
@@ -2540,12 +2665,15 @@ def _run_suite(
     suite_result["metrics"] = metrics
     suite_result["score"] = score
     suite_result["ci"] = _ci95(_suite_ci_sample_values(suite.name, run_records))
+    status_values = [str(record.get("status", "")).strip().lower() for record in run_records]
     suite_status = "ok"
-    if any_error:
+    if any_error or any(s == "error" for s in status_values):
         suite_status = "error"
-    elif any_timeout:
+    elif any_timeout or any(s == "timeout" for s in status_values):
         suite_status = "timeout"
     suite_result["status"] = suite_status
+    if suite_status == "ok":
+        suite_result.pop("run_cache", None)
     suite_result["notes"].extend(notes)
     _save_report(report_path, report)
     return suite_result
@@ -2758,6 +2886,7 @@ def main() -> int:
                 lagrangian_max=float(args.lagrangian_max),
                 shadow_obspacket=bool(args.shadow_obspacket),
                 shadow_toolcall=bool(args.shadow_toolcall),
+                resume_suite=bool(args.resume),
             )
     except KeyboardInterrupt:
         _save_report(report_path, report)
