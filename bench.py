@@ -1690,13 +1690,8 @@ def _run_suite(
     }
     preloaded_records: List[Dict[str, Any]] = []
     if bool(resume_suite) and isinstance(existing_suite_entry, dict):
-        prev_notes = existing_suite_entry.get("notes")
-        prev_per_env = existing_suite_entry.get("per_env")
+        loaded_from_cache = False
         prev_cache = existing_suite_entry.get("run_cache")
-        if isinstance(prev_notes, list):
-            suite_result["notes"] = [str(x) for x in prev_notes]
-        if isinstance(prev_per_env, list):
-            suite_result["per_env"] = [x for x in prev_per_env if isinstance(x, dict)]
         if isinstance(prev_cache, list):
             for item in prev_cache:
                 if not isinstance(item, dict):
@@ -1704,6 +1699,7 @@ def _run_suite(
                 case_obj = _case_from_cache_dict(item.get("case", {}))
                 if case_obj is None:
                     continue
+                loaded_from_cache = True
                 preloaded_records.append(
                     {
                         "case": case_obj,
@@ -1714,6 +1710,13 @@ def _run_suite(
                         "status": str(item.get("status", "error")),
                     }
                 )
+        if loaded_from_cache:
+            prev_notes = existing_suite_entry.get("notes")
+            prev_per_env = existing_suite_entry.get("per_env")
+            if isinstance(prev_notes, list):
+                suite_result["notes"] = [str(x) for x in prev_notes]
+            if isinstance(prev_per_env, list):
+                suite_result["per_env"] = [x for x in prev_per_env if isinstance(x, dict)]
     report["suites"].append(suite_result)
     _save_report(report_path, report)
     safety_smoke_metrics = _run_safety_smoke() if suite.name in {"safety", "safety_ood"} else {}
