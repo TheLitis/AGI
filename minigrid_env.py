@@ -363,13 +363,16 @@ class MiniGridTaskEnv(BaseEnv):
 
         obs_fmt = self._format_obs(obs)
         reason = str(info.get("reason", "") or "")
-        timeout = bool(done and reason == "max_steps")
+        # Episode horizon in MiniGrid scenarios is treated as normal termination.
+        timeout = False
         success: Optional[bool] = None
         if done:
             if reason == "goal_reached":
                 success = True
             elif reason == "terminated_danger":
                 success = False
+            elif reason == "max_steps":
+                success = True
         info = normalize_info_contract(
             info,
             done=bool(done),

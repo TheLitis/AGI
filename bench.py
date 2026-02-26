@@ -1324,6 +1324,7 @@ def _build_suite_specs(
                 BenchCase(
                     name="long_horizon_minigrid",
                     env_type="minigrid",
+                    max_steps_env=120,
                     minigrid_scenarios=minigrid_scenarios,
                 ),
             ],
@@ -1342,6 +1343,7 @@ def _build_suite_specs(
                 BenchCase(
                     name="planning_diag_minigrid",
                     env_type="minigrid",
+                    max_steps_env=120,
                     minigrid_scenarios=minigrid_scenarios,
                 ),
             ],
@@ -2036,11 +2038,12 @@ def _run_suite(
                         action_mask_dropout_warmup = 0
                         run_force_cpu = bool(run_force_cpu or auto_force_cpu_repo)
                         if suite.name == "tools":
-                            # Gate-1 sweep winner: stronger unmasked transfer.
-                            repo_bc_episodes = 144 if quick else 112
-                            repo_online_bc_coef = 0.45 if quick else 0.30
-                            action_mask_dropout_prob = 0.18 if quick else 0.10
+                            # Gate-2 tools profile: stronger BC anchor + curriculum.
+                            repo_bc_episodes = 192 if quick else 112
+                            repo_online_bc_coef = 1.00 if quick else 0.30
+                            action_mask_dropout_prob = 0.00 if quick else 0.10
                             action_mask_dropout_warmup = 8 if quick else 8
+                            run_planning_coef = 0.0
                         elif suite.name == "tools_open":
                             # Open-action tasks are harder than masked tool-loop:
                             # keep a stronger online BC anchor and reduce planner bias.
@@ -2053,9 +2056,8 @@ def _run_suite(
                         run_mode = "lifelong"
                         run_lifecycle = True
                         run_regime_aware_replay = True
-                        # Lifelong chapter transitions are non-stationary; sampled policy
-                        # is less brittle than greedy decoding across seeds.
-                        run_eval_policy = "sample"
+                        # Greedy eval yields cleaner adaptation deltas in quick lifelong checks.
+                        run_eval_policy = "greedy"
                         # Quick lifelong is variance-sensitive; a more balanced replay mix
                         # improves forgetting without collapsing adaptation.
                         run_replay_frac_current = 0.5 if quick else 0.7

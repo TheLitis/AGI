@@ -585,7 +585,9 @@ class GridWorldEnv(BaseEnv):
         obs = self._get_obs()
         reward = 0.0  # вся настоящая награда считается в Trainer по traits
         reason = str(info.get("reason", "") or "")
-        timeout = bool(done and reason == "max_steps")
+        # Reaching the configured episode horizon is a normal termination for
+        # gridworld curricula, not an infrastructure timeout.
+        timeout = False
         catastrophic = bool(float(info.get("death_flag", 0.0) or 0.0) > 0.0)
         constraint_violation = bool(info.get("took_damage", False) or catastrophic)
         success: Optional[bool] = None

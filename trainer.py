@@ -149,6 +149,39 @@ class RegimeConfig:
 RewardProfile = Dict[str, float]
 
 
+def _should_use_raw_env_reward(info: Dict[str, Any]) -> bool:
+    """
+    Decide whether reward should come directly from env-provided ``reward_env``.
+
+    Grid-like worlds expose event-level signals (food/damage/move/alive) and keep
+    ``reward_env`` near zero by design, so trait-based reward must stay active there.
+    Tool/language/social/computer environments already encode task utility in
+    ``reward_env`` and should use it as the primary scalar signal.
+    """
+    if not isinstance(info, dict):
+        return False
+    if "reward_env" not in info:
+        return False
+
+    env_hint = str(info.get("env_family", info.get("env_name", "")) or "").strip().lower()
+    raw_reward_families = ("instruction", "social", "computer", "repo", "tools")
+    if any(tag in env_hint for tag in raw_reward_families):
+        return True
+
+    if any(key in info for key in ("instruction_success", "social_success", "last_test_passed")):
+        return True
+
+    trait_event_keys = ("alive", "got_food", "took_damage", "moved", "death_flag")
+    has_trait_events_top = any(key in info for key in trait_event_keys)
+    events = info.get("events")
+    has_trait_events_nested = isinstance(events, dict) and any(key in events for key in trait_event_keys)
+    if has_trait_events_top or has_trait_events_nested:
+        return False
+
+    # Fallback for environments that provide only scalar reward.
+    return True
+
+
 @dataclass
 class SelfModelProbeStats:
     corr_return: float
@@ -2897,7 +2930,7 @@ class Trainer:
         self, info: Dict[str, Any], reward_profile: Optional[Dict[str, float]] = None
     ) -> float:
         env_info = info or {}
-        if "reward_env" in env_info:
+        if _should_use_raw_env_reward(env_info):
             try:
                 return float(env_info["reward_env"])
             except Exception:
@@ -2920,10 +2953,12 @@ class Trainer:
             except Exception:
                 return float(default)
 
-        alive = _safe_float(env_info.get("alive", 1.0), 1.0)
-        got_food = _safe_float(env_info.get("got_food", 0.0), 0.0)
-        took_damage = _safe_float(env_info.get("took_damage", 0.0), 0.0)
-        moved = _safe_float(env_info.get("moved", 0.0), 0.0)
+        events = env_info.get("events") if isinstance(env_info.get("events"), dict) else {}
+
+        alive = _safe_float(env_info.get("alive", events.get("alive", 1.0)), 1.0)
+        got_food = _safe_float(env_info.get("got_food", events.get("got_food", 0.0)), 0.0)
+        took_damage = _safe_float(env_info.get("took_damage", events.get("took_damage", 0.0)), 0.0)
+        moved = _safe_float(env_info.get("moved", events.get("moved", 0.0)), 0.0)
 
         r = (
             alpha_survive * w_survive * alive
