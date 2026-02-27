@@ -115,6 +115,10 @@ class RepoToolEnvConfig:
     toolloop_action_mask_allow_cycle: bool = True
     toolloop_action_mask_allow_revert: bool = False
     toolloop_action_mask_anneal_episodes: int = 0
+    # Optional curriculum knobs for tool-loop candidate menus.
+    # Keep defaults backward-compatible with the previous behavior.
+    toolloop_max_candidates: int = 4
+    toolloop_prefer_solution_first_pair: bool = False
 
 
 def _safe_relpath(path: str) -> str:
@@ -1027,7 +1031,9 @@ class RepoToolEnv(BaseEnv):
         cfg = self.config
         required = int(max(4, getattr(cfg, "procedural_candidates", 8) or 8))
         if self._is_toolloop_task(self.current_task):
-            required = int(min(required, 4))
+            cap = int(getattr(cfg, "toolloop_max_candidates", 4) or 4)
+            cap = int(max(2, cap))
+            required = int(min(required, cap))
             required = int(max(2, required))
         if required % 2 == 1:
             required += 1
@@ -1038,6 +1044,18 @@ class RepoToolEnv(BaseEnv):
             must_include=[str(correct)] if correct is not None else [],
             pool=pool_full,
         )
+        if (
+            self._is_toolloop_task(self.current_task)
+            and bool(getattr(cfg, "toolloop_prefer_solution_first_pair", False))
+            and correct is not None
+        ):
+            correct_expr = str(correct).strip()
+            ordered: List[str] = [correct_expr]
+            for expr in cand_exprs:
+                s = str(expr).strip()
+                if s != correct_expr:
+                    ordered.append(s)
+            cand_exprs = ordered
 
         indent = _ws_prefix(lines[ret_idx])
         patches: List[RepoPatch] = []

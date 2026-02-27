@@ -2483,15 +2483,29 @@ class Trainer:
             for i in order[: (-remaining)]:
                 counts[i] = max(0, counts[i] - 1)
 
+        # Build a deterministic weighted schedule to keep scenario mix stable
+        # not only globally but also across chapter prefixes/suffixes.
+        counts_left = [max(0, int(c)) for c in counts]
+        weights_step = [float(c) / float(max(1, n)) for c in counts_left]
+        accum = [0.0 for _ in counts_left]
         plan: List[Optional[int]] = []
-        for sid, cnt in zip(entries, counts):
-            if cnt > 0:
-                plan.extend([int(sid)] * int(cnt))
-        while len(plan) < n:
-            plan.append(int(entries[-1]))
-        if len(plan) > n:
-            plan = plan[:n]
-        random.shuffle(plan)
+        for _ in range(n):
+            best_idx: Optional[int] = None
+            best_key: Optional[Tuple[float, int, int]] = None
+            for i, remaining in enumerate(counts_left):
+                if remaining <= 0:
+                    continue
+                accum[i] += weights_step[i]
+                key = (accum[i], int(remaining), -int(i))
+                if best_key is None or key > best_key:
+                    best_key = key
+                    best_idx = int(i)
+            if best_idx is None:
+                plan.append(int(entries[-1]))
+                continue
+            plan.append(int(entries[best_idx]))
+            counts_left[best_idx] = int(counts_left[best_idx] - 1)
+            accum[best_idx] -= 1.0
         return plan
 
     def _reward_profile_for_regime(self, regime_name: str) -> Dict[str, float]:

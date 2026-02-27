@@ -243,6 +243,8 @@ def _build_repo_env_pool(
     seed: int,
     schedule_mode: str,
     scenario_names: Optional[List[str]] = None,
+    repo_toolloop_max_candidates: Optional[int] = None,
+    repo_toolloop_prefer_solution_first_pair: bool = False,
 ) -> EnvPool:
     from repo_tool_env import RepoToolEnv, RepoToolEnvConfig, build_repo_taskset
 
@@ -269,6 +271,9 @@ def _build_repo_env_pool(
         test_names = list(train_names)
 
     cfg = RepoToolEnvConfig()
+    if isinstance(repo_toolloop_max_candidates, int) and int(repo_toolloop_max_candidates) > 0:
+        cfg.toolloop_max_candidates = int(max(2, int(repo_toolloop_max_candidates)))
+    cfg.toolloop_prefer_solution_first_pair = bool(repo_toolloop_prefer_solution_first_pair)
     train_tasks = build_repo_taskset(train_names)
     test_tasks = build_repo_taskset(test_names)
 
@@ -297,6 +302,8 @@ def _build_mixed_env_pool(
     minigrid_scenarios: Optional[List[str]] = None,
     computer_scenarios: Optional[List[str]] = None,
     repo_scenarios: Optional[List[str]] = None,
+    repo_toolloop_max_candidates: Optional[int] = None,
+    repo_toolloop_prefer_solution_first_pair: bool = False,
     max_steps_env: int = 50,
     max_energy_env: Optional[int] = None,
 ) -> EnvPool:
@@ -331,6 +338,8 @@ def _build_mixed_env_pool(
             seed=seed,
             schedule_mode=schedule_mode,
             scenario_names=repo_scenarios,
+            repo_toolloop_max_candidates=repo_toolloop_max_candidates,
+            repo_toolloop_prefer_solution_first_pair=repo_toolloop_prefer_solution_first_pair,
         )
         if repo_scenarios
         else None
@@ -430,6 +439,8 @@ def run_experiment(
     minigrid_scenarios: Optional[List[str]] = None,
     computer_scenarios: Optional[List[str]] = None,
     repo_scenarios: Optional[List[str]] = None,
+    repo_toolloop_max_candidates: Optional[int] = None,
+    repo_toolloop_prefer_solution_first_pair: bool = False,
     regime_aware_replay: bool = False,
     replay_frac_current: float = 0.5,
     planning_horizon: int = 12,
@@ -600,6 +611,8 @@ def run_experiment(
             seed=seed,
             schedule_mode=schedule_mode,
             scenario_names=repo_scenarios,
+            repo_toolloop_max_candidates=repo_toolloop_max_candidates,
+            repo_toolloop_prefer_solution_first_pair=repo_toolloop_prefer_solution_first_pair,
         )
     elif env_choice == "mixed":
         env_pool = _build_mixed_env_pool(
@@ -609,6 +622,8 @@ def run_experiment(
             minigrid_scenarios=minigrid_scenarios,
             computer_scenarios=computer_scenarios,
             repo_scenarios=repo_scenarios,
+            repo_toolloop_max_candidates=repo_toolloop_max_candidates,
+            repo_toolloop_prefer_solution_first_pair=repo_toolloop_prefer_solution_first_pair,
             max_steps_env=max_steps_env_eff,
             max_energy_env=max_energy_env_eff,
         )
@@ -1111,6 +1126,12 @@ def run_experiment(
         "minigrid_scenarios": minigrid_scenarios,
         "computer_scenarios": computer_scenarios,
         "repo_scenarios": repo_scenarios,
+        "repo_toolloop_max_candidates": (
+            int(repo_toolloop_max_candidates)
+            if isinstance(repo_toolloop_max_candidates, int)
+            else None
+        ),
+        "repo_toolloop_prefer_solution_first_pair": bool(repo_toolloop_prefer_solution_first_pair),
         "config": {
             "seed": seed,
             "device": str(device),
@@ -1173,6 +1194,12 @@ def run_experiment(
             "minigrid_scenarios": minigrid_scenarios,
             "computer_scenarios": computer_scenarios,
             "repo_scenarios": repo_scenarios,
+            "repo_toolloop_max_candidates": (
+                int(repo_toolloop_max_candidates)
+                if isinstance(repo_toolloop_max_candidates, int)
+                else None
+            ),
+            "repo_toolloop_prefer_solution_first_pair": bool(repo_toolloop_prefer_solution_first_pair),
             "regime_aware_replay": regime_aware_replay,
             "skill_mode": skill_mode,
             "n_latent_skills": n_latent_skills,

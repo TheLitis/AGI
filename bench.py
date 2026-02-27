@@ -1972,6 +1972,8 @@ def _run_suite(
                 try:
                     repo_bc_episodes = 0
                     repo_online_bc_coef = 0.10
+                    repo_toolloop_max_candidates: Optional[int] = None
+                    repo_toolloop_prefer_solution_first_pair = False
                     action_mask_dropout_prob = 0.0
                     action_mask_dropout_warmup = int(max(0, action_mask_dropout_warmup_updates))
                     run_regime_aware_replay = False
@@ -2044,6 +2046,10 @@ def _run_suite(
                             action_mask_dropout_prob = 0.00 if quick else 0.10
                             action_mask_dropout_warmup = 8 if quick else 8
                             run_planning_coef = 0.0
+                            # Gate-2 quick curriculum: focus on workflow reliability first
+                            # by reducing candidate-menu branching in tool-loop tasks.
+                            repo_toolloop_max_candidates = 2
+                            repo_toolloop_prefer_solution_first_pair = True
                         elif suite.name == "tools_open":
                             # Open-action tasks are harder than masked tool-loop:
                             # keep a stronger online BC anchor and reduce planner bias.
@@ -2056,12 +2062,16 @@ def _run_suite(
                         run_mode = "lifelong"
                         run_lifecycle = True
                         run_regime_aware_replay = True
-                        # Greedy eval yields cleaner adaptation deltas in quick lifelong checks.
-                        run_eval_policy = "greedy"
+                        # Lifelong eval uses sampled policy by default to preserve adaptation dynamics.
+                        run_eval_policy = "sample"
                         # Quick lifelong is variance-sensitive; a more balanced replay mix
                         # improves forgetting without collapsing adaptation.
                         run_replay_frac_current = 0.5 if quick else 0.7
                         run_deterministic_torch = True
+                        if str(case.env_type) == "minigrid":
+                            # MiniGrid lifelong chapters are highly stochastic and can
+                            # under-estimate transfer with sampling; use greedy eval.
+                            run_eval_policy = "greedy"
                     if suite.name in {"safety", "safety_ood"}:
                         # Safety-first defaults for Gate2 closure: run shield + constrained RL
                         # unless caller explicitly requested stricter alternatives.
@@ -2136,6 +2146,14 @@ def _run_suite(
                         repo_online_bc_coef=float(repo_online_bc_coef),
                         repo_bc_pretrain_episodes=int(repo_bc_episodes),
                         repo_bc_pretrain_max_steps=int(run_eval_max_steps),
+                        repo_toolloop_max_candidates=(
+                            int(repo_toolloop_max_candidates)
+                            if isinstance(repo_toolloop_max_candidates, int)
+                            else None
+                        ),
+                        repo_toolloop_prefer_solution_first_pair=bool(
+                            repo_toolloop_prefer_solution_first_pair
+                        ),
                         shadow_obspacket=bool(shadow_obspacket),
                         shadow_toolcall=bool(shadow_toolcall),
                     )

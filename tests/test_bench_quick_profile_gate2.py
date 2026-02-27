@@ -65,6 +65,8 @@ def test_quick_tools_profile_uses_gate2_tuned_budget(monkeypatch, tmp_path):
     assert float(call["repo_online_bc_coef"]) == 1.0
     assert float(call["action_mask_dropout_prob"]) == 0.0
     assert int(call["action_mask_dropout_warmup_updates"]) == 8
+    assert int(call["repo_toolloop_max_candidates"]) == 2
+    assert bool(call["repo_toolloop_prefer_solution_first_pair"]) is True
     assert float(call["planning_coef"]) == 0.0
     assert int(call["stage4_updates"]) == 8
 
@@ -151,7 +153,7 @@ def test_quick_lifelong_profile_uses_balanced_replay(monkeypatch, tmp_path):
     assert len(calls) == 1
     call = calls[0]
     assert call["mode"] == "lifelong"
-    assert call["eval_policy"] == "greedy"
+    assert call["eval_policy"] == "sample"
     assert float(call["replay_frac_current"]) == 0.5
     assert int(call["lifelong_episodes_per_chapter"]) == 36
     assert int(call["stage4_updates"]) == 5
