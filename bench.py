@@ -1857,7 +1857,7 @@ def _run_suite(
         if not isinstance(case_obj, BenchCase):
             continue
         status_norm = str(record.get("status", "")).strip().lower()
-        if status_norm in {"ok", "error", "timeout", "skipped"}:
+        if status_norm in {"ok", "skipped"}:
             completed_run_keys.add(
                 _run_key(
                     case_obj,
@@ -2087,7 +2087,7 @@ def _run_suite(
                         run_constraint_budget = min(float(run_constraint_budget), 0.12)
                         run_catastrophic_budget = min(float(run_catastrophic_budget), 0.04)
                         run_lagrangian_lr = max(float(run_lagrangian_lr), 0.02)
-                    res = run_experiment(
+                    run_kwargs: Dict[str, Any] = dict(
                         seed=int(seed),
                         mode=run_mode,
                         agent_variant=str(variant),
@@ -2157,6 +2157,29 @@ def _run_suite(
                         shadow_obspacket=bool(shadow_obspacket),
                         shadow_toolcall=bool(shadow_toolcall),
                     )
+                    run_force_cpu_attempt = bool(run_kwargs.get("force_cpu", False))
+                    last_transient: Optional[Exception] = None
+                    for attempt_idx in range(2):
+                        run_kwargs["force_cpu"] = bool(run_force_cpu_attempt)
+                        try:
+                            res = run_experiment(**run_kwargs)
+                            last_transient = None
+                            break
+                        except OSError as transient_exc:
+                            err_no = getattr(transient_exc, "errno", None)
+                            transient_msg = str(transient_exc).lower()
+                            is_invalid_arg = bool(err_no == 22 or "invalid argument" in transient_msg)
+                            if attempt_idx == 0 and is_invalid_arg and not run_force_cpu_attempt:
+                                last_transient = transient_exc
+                                run_force_cpu_attempt = True
+                                suite_result["notes"].append(
+                                    f"retry_with_force_cpu_after_oserror22:{_case_label(case)}:seed={int(seed)}"
+                                )
+                                time.sleep(0.2)
+                                continue
+                            raise
+                    if last_transient is not None:
+                        raise last_transient
                 except Exception as exc:
                     skip_reason = _optional_dependency_skip_reason(exc, str(case.env_type))
                     if skip_reason:
@@ -2207,6 +2230,20 @@ def _run_suite(
                         )
 
                 suite_result["per_env"].append(per_env_entry)
+                current_key = _run_key(case, str(variant), int(seed))
+                run_records = [
+                    rec
+                    for rec in run_records
+                    if not (
+                        isinstance(rec.get("case"), BenchCase)
+                        and _run_key(
+                            rec["case"],
+                            str(rec.get("variant", "full")),
+                            int(rec.get("seed", 0)),
+                        )
+                        == current_key
+                    )
+                ]
                 run_records.append(
                     {
                         "case": case,

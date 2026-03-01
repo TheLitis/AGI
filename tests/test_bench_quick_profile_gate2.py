@@ -198,3 +198,47 @@ def test_quick_core_profile_uses_stable_budget(monkeypatch, tmp_path):
     call = calls[0]
     assert int(call["n_steps"]) == 256
     assert int(call["stage4_updates"]) == 5
+
+
+def test_run_suite_retries_oserror22_with_force_cpu(monkeypatch, tmp_path):
+    calls = []
+
+    def flaky_run_experiment(**kwargs):
+        calls.append(dict(kwargs))
+        if len(calls) == 1:
+            raise OSError(22, "Invalid argument")
+        return _fake_result()
+
+    monkeypatch.setattr(bench, "run_experiment", flaky_run_experiment)
+    suite = bench.SuiteSpec(
+        name="safety",
+        cases=[bench.BenchCase(name="safety_grid", env_type="gridworld", max_steps_env=120)],
+        implemented=True,
+    )
+    report = {"meta": {"config": {}}, "suites": []}
+
+    result = bench._run_suite(
+        suite,
+        seeds=[0],
+        variants=["full"],
+        mode="stage4",
+        quick=True,
+        quick_stub=False,
+        log_dir=str(tmp_path / "logs"),
+        use_skills=False,
+        skill_mode="handcrafted",
+        n_latent_skills=0,
+        masked_only=False,
+        unmasked_only=False,
+        eval_max_steps=120,
+        force_cpu=False,
+        auto_force_cpu_repo=True,
+        report=report,
+        report_path=Path(tmp_path) / "report.json",
+    )
+
+    assert len(calls) == 2
+    assert bool(calls[0]["force_cpu"]) is False
+    assert bool(calls[1]["force_cpu"]) is True
+    assert result["status"] == "ok"
+    assert any("retry_with_force_cpu_after_oserror22" in str(note) for note in result.get("notes", []))
