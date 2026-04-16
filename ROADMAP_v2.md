@@ -38,9 +38,9 @@ Updated: 2026-04-16
   - result: `[OPEN]`
 
 ## 2.1 Active Execution Priority
-1. Mountain #7 first: ship mandatory `Safety+OOD` pack and hit blocking safety thresholds.
-2. Recover tool-workflow reliability under new safety-blocking policy.
-3. Preserve Mountain #2/#3 openness while improving planner reality diagnostics.
+1. Reproduce the canonical quick `gate2=pass` / `gate3=pass` state on `full` and `ood` 5-seed acceptance reports.
+2. Keep Mountain #7 safety blocker closed while validating `full` and `ood`.
+3. Improve planner "pay rent" diagnostics, which still lag despite the recovered `long_horizon` score.
 4. Expand mountain depth (#1/#4/#6) without regressing reproducibility.
 
 ## 3. Gate Model (DoD)
