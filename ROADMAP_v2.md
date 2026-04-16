@@ -1,6 +1,6 @@
 ﻿# ROADMAP v2: Gate-Driven AGI-Ready Program
 
-Updated: 2026-02-21
+Updated: 2026-04-16
 
 ## 1. Goal
 - Maintain a reproducible AGI-ready research contour with measurable criteria across all 8 technical mountains.
@@ -11,25 +11,25 @@ Updated: 2026-02-21
 - Primary reference report: `reports/agi_v1.quick.seed01234.safetygate_v1.json`.
 - Current gates:
   - `gate0=pass`
-  - `gate1=fail`
-  - `gate2=fail`
-  - `gate3=fail`
+  - `gate1=pass`
+  - `gate2=pass`
+  - `gate3=pass`
   - `gate4=fail`
 - Canonical quick state:
-  - `overall.confidence = 0.8436`
-  - `generalization_score = 0.6716`
-  - `sample_efficiency_score = 0.8640`
-  - `robustness_score = 0.6946`
-  - `tool_workflow_score = 0.7917`
+  - `overall.confidence = 0.9041`
+  - `generalization_score = 0.8781`
+  - `sample_efficiency_score = 0.8733`
+  - `robustness_score = 0.8812`
+  - `tool_workflow_score = 1.0000`
 - Canonical suite snapshot:
-  - `long_horizon.score = 0.3814` (`catastrophic_fail_rate = 0.1750`, `ci.half_width = 0.1782`)
-  - `lifelong.score = 0.4997` (`forgetting_gap = 0.0213`, `forward_transfer = -0.0066`, `ci.half_width = 0.0008`)
-  - `safety.score = 0.9565` (`constraint_compliance = 0.8750`, `catastrophic_fail_rate = 0.0000`, `ci.half_width = 0.1096`)
-  - `safety_ood.score = 0.9705` (`constraint_compliance = 0.9375`, `catastrophic_fail_rate = 0.0250`, `ci.half_width = 0.0706`)
-  - `tools.score = 0.0000` (`pass_rate_unmasked = 0.5833`, `mean_steps_to_pass_unmasked = 9.2857`, `invalid_action_rate = 0.0473`, `ci.half_width = 0.1265`)
-  - `core.score = 0.5003` (`ci.half_width = 0.0004`)
-  - `language.score = 0.7279` (`causal_drop = 0.0`, `ci.half_width = 0.0444`)
-  - `social.score = 0.7625` (`transfer_rate = 0.8317`, `ci.half_width = 0.0900`)
+  - `long_horizon.score = 0.7159` (`catastrophic_fail_rate = 0.0250`, `planner_gain = 4.6712`, `ci.half_width = 0.3267`)
+  - `lifelong.score = 0.5384` (`forgetting_gap = 1.2881`, `forward_transfer = 0.7696`, `ci.half_width = 0.0375`)
+  - `safety.score = 0.9393` (`constraint_compliance = 0.8500`, `catastrophic_fail_rate = 0.0250`, `ci.half_width = 0.0959`)
+  - `safety_ood.score = 0.9621` (`constraint_compliance = 0.9375`, `catastrophic_fail_rate = 0.0500`, `ci.half_width = 0.0948`)
+  - `tools.score = 1.0000` (`pass_rate_unmasked = 1.0000`, `mean_steps_to_pass_unmasked = 2.0000`, `invalid_action_rate = 0.0000`, `ci.half_width = 0.0000`)
+  - `core.score = 1.0000` (`ci.half_width = 0.0275`)
+  - `language.score = 0.7403` (`causal_drop = 0.0063`, `ci.half_width = 0.0539`)
+  - `social.score = 0.8500` (`transfer_rate = 0.9067`, `ci.half_width = 0.0831`)
 - Dedicated safety milestone artifacts:
   - `reports/milestones/20260220_phase1_safety_checkpoint_select.quick.cuda.json` (`compliance = 0.8750`, `catastrophic = 0.0000`)
   - `reports/milestones/20260220_phase1_safety_ood_checkpoint_select.quick.cuda.json` (`compliance = 0.9375`, `catastrophic = 0.0250`)
@@ -101,14 +101,15 @@ Status: active and healthy.
 - Test/validator hardening expanded (`safety` metric checks and `.venv` pytest recursion guard).
 
 ### Phase B (Close Gate2)
-Status: reopened under safety-blocking cutover.
-- Prior Gate2 pass is superseded by stricter safety-blocking policy.
-- Safety blockers on canonical quick are now closed (`safety` + `safety_ood` pass thresholds).
-- Current blockers: `core.score`, `long_horizon.score`, `tools.pass_rate_unmasked`, and `lifelong.forward_transfer`.
+Status: closed on canonical quick; acceptance still pending on `full` and `ood`.
+- Canonical quick now passes Gate2 under the safety-blocking policy.
+- Remaining work is reproducibility on `full` and `ood`, not threshold recovery on quick.
+- Regression guards remain mandatory for `safety`, `safety_ood`, and `tools`.
 
 ### Phase C (Close Gate3)
-Status: blocked by Gate2 failure.
-- CI/variance checks remain in place; cannot close until Gate2 recovers under new policy.
+Status: closed on canonical quick; acceptance still pending on `full` and `ood`.
+- Canonical quick now satisfies Gate3 variance thresholds.
+- The program still needs matching validated `full` and `ood` 5-seed artifacts.
 
 ### Phase D (8-mountain completeness)
 Status: in progress.

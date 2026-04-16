@@ -1,4 +1,4 @@
-# Execution Checklist (Roadmap v2, Synced 2026-02-21)
+# Execution Checklist (Roadmap v2, Synced 2026-04-16)
 
 ## P0) Active Sprint Priority
 - [x] Enforce safety-blocking gate cutover in `bench.py` (`Gate2`: `compliance>=0.85`, `catastrophic<=0.05`; `Gate4`: `compliance>=0.90`, `catastrophic<=0.02`)
@@ -8,19 +8,20 @@
 - [x] Rebuild canonical 5-seed AGI quick report after safety cutover: `reports/agi_v1.quick.seed01234.safetygate_v1.json`
 - [x] Validate canonical report structure: `python validate_bench_report.py --report reports/agi_v1.quick.seed01234.safetygate_v1.json`
 - [x] Keep Mountain #2/#3 opener check green on isolated suites (`scripts/check_mountains_open.py` => `[OPEN]`)
-- [ ] Retune safety + tools under new blocking policy to recover `gate1` and approach `gate2`
+- [x] Retune safety + tools under the blocking policy until canonical quick reaches `gate2=pass` and `gate3=pass`
 - [x] Build `Safety+OOD` adversarial pack and make it part of quick acceptance runs
+- [ ] Finish matching `full` and `ood` 5-seed acceptance artifacts with validator + gate snapshot
 
 ## A) Verified Current State
 - [x] Verify targeted gate/validator/report tests: `python -m pytest -q tests/test_bench_gates.py tests/test_validate_bench_report.py tests/test_agi_bench_report.py`
 - [x] Verify full test suite health: `python -m pytest -q`
 - [x] Produce canonical 5-seed AGI quick reference report: `reports/agi_v1.quick.seed01234.safetygate_v1.json`
 - [x] Validate reference report structure + gates: `python validate_bench_report.py --report reports/agi_v1.quick.seed01234.safetygate_v1.json`
-- [x] Confirm canonical reference gate status is now safety-blocked (`gate0=pass`, `gate1=fail`, `gate2=fail`, `gate3=fail`, `gate4=fail`)
+- [x] Confirm canonical reference gate status: `gate0=pass`, `gate1=pass`, `gate2=pass`, `gate3=pass`, `gate4=fail`
 - [x] Confirm restored safety snapshot exists and is valid: `reports/bench_safety_quick_seed01234.autonomy4.json`
 - [x] Confirm Mountain #2/#3 open on isolated Gate2-Strict opener inputs (`long_horizon.score=0.6847`, `forgetting_gap=0.7799`, `forward_transfer=0.6950`)
 - [x] Produce and validate quick milestone gate snapshot: `reports/milestones/20260220_phase3_gate2_snapshot.quick.cuda.json`
-- [x] Confirm latest quick gate status remains blocked (`gate0=pass`, `gate1=fail`, `gate2=fail`, `gate3=fail`, `gate4=fail`)
+- [x] Confirm latest quick gate status remains at `gate2=pass` / `gate3=pass` while `gate4=fail`
 - [x] Confirm safety blocker thresholds are met on dedicated quick milestones:
   - `reports/milestones/20260220_phase1_safety_checkpoint_select.quick.cuda.json` (`constraint_compliance=0.875`, `catastrophic_fail_rate=0.0`)
   - `reports/milestones/20260220_phase1_safety_ood_checkpoint_select.quick.cuda.json` (`constraint_compliance=0.9375`, `catastrophic_fail_rate=0.025`)
@@ -35,9 +36,9 @@
 - [x] Missing/invalid safety metrics are fail-conditions for blocking gates
 
 ## C) Acceptance Runs Beyond Quick
-- [ ] Full 5-seed run: `python bench.py --suite agi_v1 --seeds 0,1,2,3,4 --report reports/agi_v1.full.seed01234.accept.json`
-- [ ] Full 5-seed OOD run: `python bench.py --suite agi_v1 --ood --seeds 0,1,2,3,4 --report reports/agi_v1.full.ood.seed01234.accept.json`
-- [ ] Confirm gate consistency and safety-threshold compliance across quick/full/OOD
+- [ ] Full 5-seed run: `python bench.py --suite agi_v1 --seeds 0,1,2,3,4 --allow-cuda --resume --report reports/milestones/20260301_phase3_gate2_closure.full.cuda.iter1.json`
+- [ ] Full 5-seed OOD run: `python bench.py --suite agi_v1 --ood --seeds 0,1,2,3,4 --allow-cuda --resume --report reports/milestones/<id>.ood.cuda.json`
+- [ ] Confirm gate consistency and safety-threshold compliance across quick/full/OOD with `scripts/check_gate_regression.py`
 
 ## D) 8-Mountain Depth Backlog (Mechanisms)
 - [ ] Mountain #7 priority: add mandatory `Safety+OOD` adversarial suite (`constraint_compliance` + `catastrophic_fail_rate` blocking on quick/full/OOD)
