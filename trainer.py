@@ -302,6 +302,8 @@ class Trainer:
         n_latent_skills: int = 0,
         shadow_obspacket: bool = False,
         shadow_toolcall: bool = False,
+        trajectory_export_dir: Optional[str] = None,
+        trajectory_max_episodes: int = 0,
     ):
         self.env = env
         self.env_family: str = "gridworld"
@@ -448,6 +450,10 @@ class Trainer:
         self.last_shadow_toolcall_steps = 0
         self.last_shadow_roundtrip_mismatch_count = 0
         self.last_shadow_error_count = 0
+        self.trajectory_export_dir = Path(trajectory_export_dir) if trajectory_export_dir else None
+        self.trajectory_max_episodes = max(0, int(trajectory_max_episodes or 0))
+        self.trajectory_exported_episodes = 0
+        self.trajectory_export_error_count = 0
         # CPU-side index validation is useful while debugging, but calling
         # detach().cpu() in every rollout step serializes CUDA work.
         self.validate_device_indices = False
@@ -947,6 +953,115 @@ class Trainer:
                 except Exception:
                     continue
         return totals
+
+    def _trajectory_export_path(self) -> Optional[Path]:
+        if self.trajectory_export_dir is None or self.trajectory_max_episodes <= 0:
+            return None
+        run_id = getattr(getattr(self, "logger", None), "run_id", None) or f"run_{int(time.time())}"
+        filename = ExperimentLogger._sanitize_run_id_for_filename(str(run_id))
+        return self.trajectory_export_dir / f"{filename}.jsonl"
+
+    def _should_export_trajectory_episode(self) -> bool:
+        return bool(
+            self._trajectory_export_path() is not None
+            and int(getattr(self, "trajectory_exported_episodes", 0)) < int(self.trajectory_max_episodes)
+        )
+
+    @staticmethod
+    def _compact_patch_for_trace(patch: Any) -> Any:
+        if isinstance(patch, np.ndarray):
+            arr = np.asarray(patch)
+            if arr.ndim <= 2 and arr.size <= 256:
+                return arr.astype(int, copy=False).tolist()
+            return {"shape": list(arr.shape), "dtype": str(arr.dtype)}
+        return None
+
+    @staticmethod
+    def _compact_info_for_trace(info: Any) -> Dict[str, Any]:
+        if not isinstance(info, dict):
+            return {}
+        keep = (
+            "terminated_reason",
+            "success",
+            "constraint_violation",
+            "catastrophic",
+            "timeout",
+            "reward_env",
+            "got_food",
+            "took_damage",
+            "moved",
+            "alive",
+            "death_flag",
+            "last_test_passed",
+            "pytest_timeout",
+            "tests_passed",
+            "tests_total",
+            "steps_taken",
+            "remaining_steps",
+            "progress",
+            "scenario_id",
+            "env_id",
+            "env_family",
+        )
+        out: Dict[str, Any] = {}
+        for key in keep:
+            if key not in info:
+                continue
+            value = info.get(key)
+            if isinstance(value, (str, bool, int, float)) or value is None:
+                out[key] = value
+        events = info.get("events")
+        if isinstance(events, dict):
+            out["events"] = {
+                str(k): float(v)
+                for k, v in events.items()
+                if isinstance(v, (int, float)) and math.isfinite(float(v))
+            }
+        return out
+
+    def _export_trajectory_episode(
+        self,
+        *,
+        stage: str,
+        episode_index: int,
+        use_self: bool,
+        planning_coef: float,
+        env_name: str,
+        scenario_name: str,
+        env_id: int,
+        scenario_id: int,
+        total_return: float,
+        length: int,
+        steps: List[Dict[str, Any]],
+        final_info: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        path = self._trajectory_export_path()
+        if path is None or self.trajectory_exported_episodes >= self.trajectory_max_episodes:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "schema_version": "trajectory.v0.1",
+                "timestamp": time.time(),
+                "run_id": getattr(getattr(self, "logger", None), "run_id", None),
+                "stage": str(stage),
+                "episode_index": int(episode_index),
+                "use_self": bool(use_self),
+                "planning_coef": float(planning_coef),
+                "env_name": str(env_name),
+                "scenario_name": str(scenario_name),
+                "env_id": int(env_id),
+                "scenario_id": int(scenario_id),
+                "total_return": float(total_return),
+                "length": int(length),
+                "final_info": self._compact_info_for_trace(final_info or {}),
+                "steps": list(steps),
+            }
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(payload, ensure_ascii=False, allow_nan=False) + "\n")
+            self.trajectory_exported_episodes += 1
+        except Exception:
+            self.trajectory_export_error_count += 1
 
     def _shadow_obspacket_roundtrip_obs(
         self,
@@ -7171,7 +7286,7 @@ class Trainer:
             shadow_roundtrip_mismatch_count = 0
             shadow_error_count = 0
 
-            for _ in range(n_episodes):
+            for episode_idx in range(n_episodes):
                 obs = self.env.reset()
                 shadow_step, shadow_mismatch, shadow_error = self._shadow_obspacket_roundtrip_obs(
                     obs,
@@ -7235,6 +7350,8 @@ class Trainer:
                 episode_rewards: List[float] = []
                 episode_planner_reality_rows: List[Tuple[int, float, float, float, float]] = []
                 repo_episode_saw_failure = False
+                export_this_episode = self._should_export_trajectory_episode()
+                trajectory_steps: List[Dict[str, Any]] = []
 
                 while not done and t < max_steps:
                     skill_state["obs_history"].append({"patch": patch.copy(), "energy": float(energy)})
@@ -7415,7 +7532,12 @@ class Trainer:
                                         int(torch.argmax(planner_logits_for_diag, dim=-1).item()) == action_idx
                                     )
 
-                    next_obs, _, done, info = self.env.step(action.item())
+                    action_int = int(action.item())
+                    prev_patch = patch
+                    prev_energy = float(energy)
+                    prev_env_id = int(env_id)
+                    prev_scenario_id = int(scenario_id)
+                    next_obs, _, done, info = self.env.step(action_int)
                     shadow_step, shadow_mismatch, shadow_error = self._shadow_obspacket_roundtrip_obs(
                         next_obs,
                         split="eval",
@@ -7427,6 +7549,22 @@ class Trainer:
                     flags = self._extract_contract_flags(info, done=bool(done))
                     info = flags["normalized_info"]
                     reward_env = self.compute_preference_reward(info)
+                    if export_this_episode:
+                        trajectory_steps.append(
+                            {
+                                "step": int(t),
+                                "obs_patch": self._compact_patch_for_trace(prev_patch),
+                                "energy": float(prev_energy),
+                                "action": int(action_int),
+                                "reward": float(reward_env),
+                                "done": bool(done),
+                                "next_obs_patch": self._compact_patch_for_trace(next_obs.get("patch")),
+                                "next_energy": float(next_obs.get("energy", 0.0)),
+                                "scenario_id": int(prev_scenario_id),
+                                "env_id": int(prev_env_id),
+                                "info": self._compact_info_for_trace(info),
+                            }
+                        )
                     episode_rewards.append(float(reward_env))
                     if isinstance(info, dict) and "last_test_passed" in info:
                         if info.get("last_test_passed") is False:
@@ -7569,6 +7707,22 @@ class Trainer:
                         scenario_id=int(scenario_id),
                         scenario_name=str(scenario_name),
                         env_descriptor=env_desc_np,
+                    )
+
+                if export_this_episode:
+                    self._export_trajectory_episode(
+                        stage=f"eval_{'self' if split_use_self else 'no_self'}",
+                        episode_index=int(episode_idx),
+                        use_self=bool(split_use_self),
+                        planning_coef=float(planning_coef),
+                        env_name=str(env_name),
+                        scenario_name=str(scenario_name),
+                        env_id=int(env_id),
+                        scenario_id=int(scenario_id),
+                        total_return=float(total_r),
+                        length=int(t),
+                        steps=trajectory_steps,
+                        final_info=info,
                     )
 
                 split = _classify_env(env_name, env_id)
@@ -7766,6 +7920,8 @@ class Trainer:
                     shadow_roundtrip_mismatch_count + shadow_toolcall_mismatch
                 ),
                 "shadow_error_count": int(shadow_error_count + shadow_toolcall_errors),
+                "trajectory_exported_episodes": int(getattr(self, "trajectory_exported_episodes", 0)),
+                "trajectory_export_error_count": int(getattr(self, "trajectory_export_error_count", 0)),
             }
             planner_summary = self._planner_debug_summary(
                 alpha_values=planner_alpha_vals,
@@ -7883,6 +8039,8 @@ class Trainer:
                 "shadow_toolcall_steps",
                 "shadow_roundtrip_mismatch_count",
                 "shadow_error_count",
+                "trajectory_exported_episodes",
+                "trajectory_export_error_count",
             ):
                 if key in unmasked:
                     results[f"unmasked_{key}"] = unmasked[key]

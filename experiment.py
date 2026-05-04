@@ -501,6 +501,8 @@ def run_experiment(
     force_cpu: bool = False,
     shadow_obspacket: bool = False,
     shadow_toolcall: bool = False,
+    trajectory_export_dir: Optional[str] = None,
+    trajectory_max_episodes: int = 0,
 ) -> Dict[str, Any]:
     """
     Run the staged training pipeline and return metrics.
@@ -691,6 +693,8 @@ def run_experiment(
         lagrangian_max=float(lagrangian_max),
         shadow_obspacket=bool(shadow_obspacket),
         shadow_toolcall=bool(shadow_toolcall),
+        trajectory_export_dir=trajectory_export_dir,
+        trajectory_max_episodes=int(trajectory_max_episodes),
     )
 
     if resume_from:
@@ -1208,6 +1212,8 @@ def run_experiment(
             "force_cpu": bool(force_cpu_flag),
             "shadow_obspacket": bool(shadow_obspacket),
             "shadow_toolcall": bool(shadow_toolcall),
+            "trajectory_export_dir": trajectory_export_dir,
+            "trajectory_max_episodes": int(trajectory_max_episodes),
         },
     }
 

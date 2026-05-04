@@ -1583,6 +1583,23 @@ def parse_args() -> argparse.Namespace:
         help="Enable shadow int-action->ToolCallEnvelope->int-action roundtrip logging (repo env only).",
     )
     parser.add_argument(
+        "--save-trajectories",
+        action="store_true",
+        help="Export a bounded JSONL sample of eval trajectories for visual replay.",
+    )
+    parser.add_argument(
+        "--trajectory-dir",
+        type=str,
+        default="reports/trajectories",
+        help="Directory for --save-trajectories JSONL files.",
+    )
+    parser.add_argument(
+        "--trajectory-max-episodes",
+        type=int,
+        default=2,
+        help="Maximum eval episodes to export per run when --save-trajectories is enabled.",
+    )
+    parser.add_argument(
         "--skill-mode",
         type=str,
         default="handcrafted",
@@ -1631,6 +1648,9 @@ def _run_suite(
     lagrangian_max: float = 10.0,
     shadow_obspacket: bool = False,
     shadow_toolcall: bool = False,
+    save_trajectories: bool = False,
+    trajectory_dir: str = "reports/trajectories",
+    trajectory_max_episodes: int = 2,
     resume_suite: bool = False,
 ) -> Dict[str, Any]:
     if not isinstance(report.get("suites"), list):
@@ -2166,6 +2186,10 @@ def _run_suite(
                         ),
                         shadow_obspacket=bool(shadow_obspacket),
                         shadow_toolcall=bool(shadow_toolcall),
+                        trajectory_export_dir=str(trajectory_dir) if save_trajectories else None,
+                        trajectory_max_episodes=(
+                            int(max(0, trajectory_max_episodes)) if save_trajectories else 0
+                        ),
                     )
                     run_force_cpu_attempt = bool(run_kwargs.get("force_cpu", False))
                     last_transient: Optional[Exception] = None
@@ -2831,6 +2855,9 @@ def main() -> int:
         "lagrangian_max": float(args.lagrangian_max),
         "shadow_obspacket": bool(args.shadow_obspacket),
         "shadow_toolcall": bool(args.shadow_toolcall),
+        "save_trajectories": bool(args.save_trajectories),
+        "trajectory_dir": str(args.trajectory_dir),
+        "trajectory_max_episodes": int(max(0, args.trajectory_max_episodes)),
         "force_cpu": bool(effective_force_cpu),
         "auto_force_cpu_repo": bool(auto_force_cpu_repo),
         "milestone_id": milestone_id,
@@ -2956,6 +2983,9 @@ def main() -> int:
                 lagrangian_max=float(args.lagrangian_max),
                 shadow_obspacket=bool(args.shadow_obspacket),
                 shadow_toolcall=bool(args.shadow_toolcall),
+                save_trajectories=bool(args.save_trajectories),
+                trajectory_dir=str(args.trajectory_dir),
+                trajectory_max_episodes=int(max(0, args.trajectory_max_episodes)),
                 resume_suite=bool(args.resume),
             )
     except KeyboardInterrupt:
