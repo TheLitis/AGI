@@ -1766,7 +1766,17 @@ def _run_suite(
     run_self_reflection = True
     run_stage3c = True
     run_lifecycle = True
-    if quick:
+    gate2_profile_suites = {
+        "long_horizon",
+        "planning_diag",
+        "lifelong",
+        "lifelong_diag",
+        "core",
+        "safety",
+        "safety_ood",
+    }
+    use_gate2_profile = bool(quick or suite.name in gate2_profile_suites)
+    if use_gate2_profile:
         episodes_per_phase = 8
         n_steps = 128
         planning_horizon = 6
@@ -1786,7 +1796,7 @@ def _run_suite(
         run_self_reflection = False
         run_stage3c = False
         run_lifecycle = False
-        if suite.name in {"language", "social"}:
+        if quick and suite.name in {"language", "social"}:
             # Give sparse success suites more signal in quick mode.
             eval_episodes = 16
             n_steps = 256
@@ -1797,7 +1807,7 @@ def _run_suite(
                 n_steps = 512
                 stage2_updates = 12
                 stage4_updates = 24
-        elif suite.name in {"tools", "tools_open"}:
+        elif quick and suite.name in {"tools", "tools_open"}:
             # Repo tool suites are the noisiest quick cases; give them more budget.
             eval_episodes = 12
             n_steps = 256
@@ -2066,7 +2076,7 @@ def _run_suite(
                         run_eval_policy = "sample"
                         # Quick lifelong is variance-sensitive; a more balanced replay mix
                         # improves forgetting without collapsing adaptation.
-                        run_replay_frac_current = 0.5 if quick else 0.7
+                        run_replay_frac_current = 0.5 if use_gate2_profile else 0.7
                         run_deterministic_torch = True
                         if str(case.env_type) == "minigrid":
                             # MiniGrid lifelong chapters are highly stochastic and can

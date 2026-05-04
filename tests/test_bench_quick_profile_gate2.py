@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import bench
+import pytest
 
 
 def _fake_result() -> dict:
@@ -198,6 +199,91 @@ def test_quick_core_profile_uses_stable_budget(monkeypatch, tmp_path):
     call = calls[0]
     assert int(call["n_steps"]) == 256
     assert int(call["stage4_updates"]) == 5
+
+
+@pytest.mark.parametrize(
+    ("suite", "case", "expected"),
+    [
+        (
+            "long_horizon",
+            bench.BenchCase(name="long_grid", env_type="gridworld", max_steps_env=120, max_energy_env=160),
+            {
+                "n_steps": 384,
+                "stage2_updates": 6,
+                "stage4_updates": 10,
+                "planning_horizon": 20,
+                "planner_rollouts": 6,
+                "run_lifecycle": False,
+            },
+        ),
+        (
+            "lifelong",
+            bench.BenchCase(name="life_grid", env_type="gridworld", max_energy_env=80),
+            {
+                "n_steps": 256,
+                "stage2_updates": 3,
+                "stage4_updates": 5,
+                "lifelong_episodes_per_chapter": 36,
+                "replay_frac_current": 0.5,
+                "run_lifecycle": True,
+            },
+        ),
+        (
+            "safety",
+            bench.BenchCase(name="safety_grid", env_type="gridworld", max_steps_env=120, max_energy_env=160),
+            {
+                "n_steps": 160,
+                "stage2_updates": 2,
+                "stage4_updates": 2,
+                "enable_risk_shield": True,
+                "use_constrained_rl": True,
+                "risk_head_coef": 0.25,
+                "run_lifecycle": False,
+            },
+        ),
+    ],
+)
+def test_full_gate2_blocker_profiles_reuse_stabilized_budgets(monkeypatch, tmp_path, suite, case, expected):
+    calls = []
+
+    def fake_run_experiment(**kwargs):
+        calls.append(dict(kwargs))
+        return _fake_result()
+
+    monkeypatch.setattr(bench, "run_experiment", fake_run_experiment)
+    report = {"meta": {"config": {}}, "suites": []}
+
+    bench._run_suite(
+        bench.SuiteSpec(name=suite, cases=[case], implemented=True),
+        seeds=[0],
+        variants=["full"],
+        mode="stage4",
+        quick=False,
+        quick_stub=False,
+        log_dir=str(tmp_path / "logs"),
+        use_skills=False,
+        skill_mode="handcrafted",
+        n_latent_skills=0,
+        masked_only=False,
+        unmasked_only=False,
+        eval_max_steps=120,
+        force_cpu=True,
+        auto_force_cpu_repo=True,
+        report=report,
+        report_path=Path(tmp_path) / "report.json",
+    )
+
+    assert len(calls) == 1
+    call = calls[0]
+    assert bool(call["run_self_reflection"]) is False
+    assert bool(call["run_stage3c"]) is False
+    for key, value in expected.items():
+        if isinstance(value, bool):
+            assert bool(call[key]) is value
+        elif isinstance(value, float):
+            assert float(call[key]) == value
+        else:
+            assert int(call[key]) == value
 
 
 def test_run_suite_retries_oserror22_with_force_cpu(monkeypatch, tmp_path):
