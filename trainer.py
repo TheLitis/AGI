@@ -2508,6 +2508,52 @@ class Trainer:
             accum[best_idx] -= 1.0
         return plan
 
+    @staticmethod
+    def _lifelong_adaptation_delta(
+        values: List[float],
+        scenario_labels: Optional[List[Any]] = None,
+    ) -> Optional[float]:
+        """
+        Estimate within-regime adaptation as tail performance minus head performance.
+
+        Lifelong chapters mix scenarios with different reward scales. When the
+        first and last half contain different scenario mixes, a raw tail-head
+        delta can falsely report negative transfer. If per-episode scenario
+        labels are available, compute the delta within scenarios present in both
+        halves and average those deltas by matched support. Fall back to the
+        historical raw delta when labels are missing or unusable.
+        """
+        if len(values) < 2:
+            return None
+        vals = [float(v) for v in values]
+        half = max(1, len(vals) // 2)
+        head_vals = vals[:half]
+        tail_vals = vals[-half:]
+        raw_delta = float(np.mean(tail_vals) - np.mean(head_vals))
+
+        if not scenario_labels or len(scenario_labels) != len(vals):
+            return raw_delta
+
+        head_labels = [str(x) for x in scenario_labels[:half]]
+        tail_labels = [str(x) for x in scenario_labels[-half:]]
+        common = sorted(set(head_labels).intersection(tail_labels))
+        if not common:
+            return raw_delta
+
+        weighted_delta = 0.0
+        total_weight = 0.0
+        for label in common:
+            h = [v for v, lbl in zip(head_vals, head_labels) if lbl == label]
+            t = [v for v, lbl in zip(tail_vals, tail_labels) if lbl == label]
+            if not h or not t:
+                continue
+            weight = float(min(len(h), len(t)))
+            weighted_delta += weight * float(np.mean(t) - np.mean(h))
+            total_weight += weight
+        if total_weight <= 0.0:
+            return raw_delta
+        return float(weighted_delta / total_weight)
+
     def _reward_profile_for_regime(self, regime_name: str) -> Dict[str, float]:
         """
         Map regime names to reward profile modifiers.
@@ -8627,14 +8673,6 @@ class Trainer:
         planner_margin_vals_all: List[float] = []
         planner_override_vals_all: List[float] = []
 
-        def _adaptation_delta(values: List[float]) -> Optional[float]:
-            if len(values) < 2:
-                return None
-            half = max(1, len(values) // 2)
-            head = float(np.mean(values[:half]))
-            tail = float(np.mean(values[-half:]))
-            return tail - head
-
         def _collect_trait_stats(trait_head: torch.Tensor, trait_tail: torch.Tensor) -> Dict[str, Any]:
             trait_head_list = trait_head.detach().cpu().numpy().flatten().tolist()
             trait_tail_list = trait_tail.detach().cpu().numpy().flatten().tolist()
@@ -8673,6 +8711,7 @@ class Trainer:
             chapter_survival: List[float] = []
             chapter_uncertainty: List[float] = []
             scenario_counts: Dict[str, int] = {}
+            chapter_scenarios: List[str] = []
             chapter_transitions: List[Transition] = []
             planner_alpha_vals_ch: List[float] = []
             planner_js_vals_ch: List[float] = []
@@ -8682,11 +8721,17 @@ class Trainer:
             for ep_idx in range(episodes_per_chapter):
                 scenario_id = self._sample_scenario_for_regime(regime, scenario_map)
                 obs = self.env.reset(scenario_id=scenario_id)
-                scenario_counts[str(scenario_id)] = scenario_counts.get(str(scenario_id), 0) + 1
                 patch = obs["patch"]
                 energy = obs["energy"]
                 scenario_id_ep = int(obs.get("scenario_id", getattr(self.env, "current_scenario_id", scenario_id)))
                 env_id = int(obs.get("env_id", getattr(self.env, "env_id", 0)))
+                scenario_name = obs.get(
+                    "scenario_name",
+                    getattr(self.env, "current_scenario_name", str(scenario_id_ep)),
+                )
+                scenario_key = str(scenario_name)
+                scenario_counts[scenario_key] = scenario_counts.get(scenario_key, 0) + 1
+                chapter_scenarios.append(scenario_key)
 
                 h_w = torch.zeros(
                     1,
@@ -9087,6 +9132,7 @@ class Trainer:
                     "description": regime.description,
                     "returns": [float(x) for x in chapter_returns],
                     "scenario_counts": scenario_counts,
+                    "scenario_sequence": list(chapter_scenarios),
                     "trait_memory_recall": dict(trait_memory_recall),
                     "trait_memory_updated": bool(trait_memory_updated),
                     "train_info": {
@@ -9099,8 +9145,22 @@ class Trainer:
                 }
             )
 
-        r2_delta = _adaptation_delta(per_chapter[1]["returns"]) if len(per_chapter) > 1 else None
-        r3_delta = _adaptation_delta(per_chapter[2]["returns"]) if len(per_chapter) > 2 else None
+        r2_delta = (
+            self._lifelong_adaptation_delta(
+                per_chapter[1]["returns"],
+                per_chapter[1].get("scenario_sequence"),
+            )
+            if len(per_chapter) > 1
+            else None
+        )
+        r3_delta = (
+            self._lifelong_adaptation_delta(
+                per_chapter[2]["returns"],
+                per_chapter[2].get("scenario_sequence"),
+            )
+            if len(per_chapter) > 2
+            else None
+        )
         forgetting_gap = None
         retain_score = None
         # regime-specific forgetting using "_return" chapters when available
@@ -9259,14 +9319,6 @@ class Trainer:
         planner_margin_vals_all: List[float] = []
         planner_override_vals_all: List[float] = []
 
-        def _adaptation_delta(values: List[float]) -> Optional[float]:
-            if len(values) < 2:
-                return None
-            half = max(1, len(values) // 2)
-            head = float(np.mean(values[:half]))
-            tail = float(np.mean(values[-half:]))
-            return tail - head
-
         def _collect_trait_stats(trait_head: torch.Tensor, trait_tail: torch.Tensor) -> Dict[str, Any]:
             trait_head_list = trait_head.detach().cpu().numpy().flatten().tolist()
             trait_tail_list = trait_tail.detach().cpu().numpy().flatten().tolist()
@@ -9305,6 +9357,7 @@ class Trainer:
             chapter_survival: List[float] = []
             chapter_uncertainty: List[float] = []
             scenario_counts: Dict[str, int] = {}
+            chapter_scenarios: List[str] = []
             planner_alpha_vals_ch: List[float] = []
             planner_js_vals_ch: List[float] = []
             planner_margin_vals_ch: List[float] = []
@@ -9331,7 +9384,9 @@ class Trainer:
                     "scenario_name",
                     getattr(self.env, "current_scenario_name", str(scenario_id_ep)),
                 )
-                scenario_counts[scenario_name] = scenario_counts.get(scenario_name, 0) + 1
+                scenario_key = str(scenario_name)
+                scenario_counts[scenario_key] = scenario_counts.get(scenario_key, 0) + 1
+                chapter_scenarios.append(scenario_key)
 
                 h_w = torch.zeros(
                     1,
@@ -9666,6 +9721,7 @@ class Trainer:
                     "description": regime.description,
                     "returns": [float(x) for x in chapter_returns],
                     "scenario_counts": scenario_counts,
+                    "scenario_sequence": list(chapter_scenarios),
                     "trait_memory_recall": dict(trait_memory_recall),
                     "trait_memory_updated": bool(trait_memory_updated),
                     "planner_debug": chapter_planner_summary,
@@ -9673,8 +9729,22 @@ class Trainer:
             )
 
         # Continual-learning indicators
-        r2_delta = _adaptation_delta(per_chapter[1]["returns"]) if len(per_chapter) > 1 else None
-        r3_delta = _adaptation_delta(per_chapter[2]["returns"]) if len(per_chapter) > 2 else None
+        r2_delta = (
+            self._lifelong_adaptation_delta(
+                per_chapter[1]["returns"],
+                per_chapter[1].get("scenario_sequence"),
+            )
+            if len(per_chapter) > 1
+            else None
+        )
+        r3_delta = (
+            self._lifelong_adaptation_delta(
+                per_chapter[2]["returns"],
+                per_chapter[2].get("scenario_sequence"),
+            )
+            if len(per_chapter) > 2
+            else None
+        )
         forgetting_gap = None
         forgetting_per_regime: Dict[str, float] = {}
         for name, base_val in baseline_regime_perf.items():
