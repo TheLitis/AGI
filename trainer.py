@@ -2675,6 +2675,35 @@ class Trainer:
             return raw_delta
         return float(weighted_delta / total_weight)
 
+    @staticmethod
+    def _lifelong_forgetting_summary(
+        forgetting_per_regime: Dict[str, float],
+        regime_order: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        valid: Dict[str, float] = {}
+        for key, value in forgetting_per_regime.items():
+            if isinstance(value, (int, float)) and math.isfinite(float(value)):
+                valid[str(key)] = float(value)
+        if not valid:
+            return {
+                "primary_regime": None,
+                "primary_gap": None,
+                "worst_regime": None,
+                "worst_gap": None,
+                "mean_gap": None,
+            }
+
+        ordered = [str(x) for x in (regime_order or []) if str(x) in valid]
+        primary_regime = ordered[0] if ordered else sorted(valid)[0]
+        worst_regime = min(valid.keys(), key=lambda name: (valid[name], name))
+        return {
+            "primary_regime": primary_regime,
+            "primary_gap": float(valid[primary_regime]),
+            "worst_regime": worst_regime,
+            "worst_gap": float(valid[worst_regime]),
+            "mean_gap": float(np.mean(list(valid.values()))),
+        }
+
     def _reward_profile_for_regime(self, regime_name: str) -> Dict[str, float]:
         """
         Map regime names to reward profile modifiers.
@@ -9349,10 +9378,13 @@ class Trainer:
                 continue
             gap_val = float(cur) - float(base_val)
             forgetting_per_regime[name] = gap_val
+        forgetting_summary = self._lifelong_forgetting_summary(
+            forgetting_per_regime,
+            [rc.name for rc in schedule],
+        )
         if forgetting_per_regime:
-            first_name = next(iter(forgetting_per_regime))
-            forgetting_gap = forgetting_per_regime.get(first_name)
-            retain_score = forgetting_gap
+            forgetting_gap = forgetting_summary.get("primary_gap")
+            retain_score = forgetting_summary.get("worst_gap")
         self.current_regime_name = ""
 
         metrics = {
@@ -9367,6 +9399,18 @@ class Trainer:
             "lifelong_adaptation_R2_delta": float(r2_delta) if r2_delta is not None else None,
             "lifelong_adaptation_R3_delta": float(r3_delta) if r3_delta is not None else None,
             "lifelong_forgetting_R1_gap": float(forgetting_gap) if forgetting_gap is not None else None,
+            "lifelong_forgetting_primary_regime": forgetting_summary.get("primary_regime"),
+            "lifelong_forgetting_worst_gap": (
+                float(forgetting_summary["worst_gap"])
+                if forgetting_summary.get("worst_gap") is not None
+                else None
+            ),
+            "lifelong_forgetting_worst_regime": forgetting_summary.get("worst_regime"),
+            "lifelong_forgetting_mean_gap": (
+                float(forgetting_summary["mean_gap"])
+                if forgetting_summary.get("mean_gap") is not None
+                else None
+            ),
             "lifelong_forgetting_per_regime": forgetting_per_regime,
             "retain_score": float(retain_score) if retain_score is not None else None,
             "prior_traits": prior_traits.detach().cpu().numpy().flatten().tolist(),
@@ -9380,6 +9424,7 @@ class Trainer:
                 "baseline": baseline_regime_perf,
                 "current": eval_current,
                 "gap": forgetting_per_regime,
+                "summary": forgetting_summary,
             },
         }
         metrics.update(
@@ -9919,8 +9964,12 @@ class Trainer:
                 continue
             gap_val = float(cur) - float(base_val)
             forgetting_per_regime[name] = gap_val
+        forgetting_summary = self._lifelong_forgetting_summary(
+            forgetting_per_regime,
+            [rc.name for rc in schedule],
+        )
         if forgetting_per_regime:
-            forgetting_gap = forgetting_per_regime.get(next(iter(forgetting_per_regime)))
+            forgetting_gap = forgetting_summary.get("primary_gap")
 
         metrics = {
             "agent_variant": agent_variant,
@@ -9938,7 +9987,24 @@ class Trainer:
             "lifelong_adaptation_R2_delta": float(r2_delta) if r2_delta is not None else None,
             "lifelong_adaptation_R3_delta": float(r3_delta) if r3_delta is not None else None,
             "lifelong_forgetting_R1_gap": float(forgetting_gap) if forgetting_gap is not None else None,
+            "lifelong_forgetting_primary_regime": forgetting_summary.get("primary_regime"),
+            "lifelong_forgetting_worst_gap": (
+                float(forgetting_summary["worst_gap"])
+                if forgetting_summary.get("worst_gap") is not None
+                else None
+            ),
+            "lifelong_forgetting_worst_regime": forgetting_summary.get("worst_regime"),
+            "lifelong_forgetting_mean_gap": (
+                float(forgetting_summary["mean_gap"])
+                if forgetting_summary.get("mean_gap") is not None
+                else None
+            ),
             "lifelong_forgetting_per_regime": forgetting_per_regime,
+            "lifelong_forgetting": {
+                "baseline": baseline_regime_perf,
+                "gap": forgetting_per_regime,
+                "summary": forgetting_summary,
+            },
             "prior_traits": prior_traits.detach().cpu().numpy().flatten().tolist(),
             "final_traits": current_traits.detach().cpu().numpy().flatten().tolist(),
             "lifelong_trait_memory_keys": sorted(self.lifelong_trait_memory.keys()),

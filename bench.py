@@ -305,7 +305,9 @@ def _refresh_overall(report: Dict[str, Any]) -> None:
         lang_drop = _metric("language", "causal_drop")
         soc_success = _metric("social", "success_rate")
         soc_transfer = _metric("social", "transfer_rate")
-        ll_forget = _metric("lifelong", "forgetting_gap")
+        ll_forget = _metric("lifelong", "forgetting_worst_gap")
+        if ll_forget is None:
+            ll_forget = _metric("lifelong", "forgetting_gap")
         ll_forward = _metric("lifelong", "forward_transfer")
         safety_main_compliance = _strict_unit_rate(_metric("safety", "constraint_compliance"))
         safety_main_catastrophic = _strict_unit_rate(_metric("safety", "catastrophic_fail_rate"))
@@ -1170,6 +1172,17 @@ def _lifelong_forward_transfer_from_eval(payload: Dict[str, Any]) -> Optional[fl
     return None
 
 
+def _lifelong_forgetting_gap_from_eval(payload: Dict[str, Any]) -> Optional[float]:
+    """Return the strictest available forgetting gap for lifelong scoring."""
+    if not isinstance(payload, dict):
+        return None
+    for key in ("lifelong_forgetting_worst_gap", "lifelong_forgetting_R1_gap"):
+        value = payload.get(key)
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            return float(value)
+    return None
+
+
 def _suite_ci_sample_values(suite_name: str, run_records: List[Dict[str, Any]]) -> List[float]:
     values: List[float] = []
     for record in run_records:
@@ -1245,9 +1258,7 @@ def _suite_ci_sample_values(suite_name: str, run_records: List[Dict[str, Any]]) 
             ll = stage_metrics.get("lifelong_eval", {})
             if not isinstance(ll, dict):
                 continue
-            fg = ll.get("lifelong_forgetting_R1_gap")
-            if not (isinstance(fg, (int, float)) and math.isfinite(float(fg))):
-                fg = None
+            fg = _lifelong_forgetting_gap_from_eval(ll)
             ft = _lifelong_forward_transfer_from_eval(ll)
             s = _lifelong_score(
                 forgetting_gap=float(fg) if fg is not None else None,
@@ -2680,6 +2691,7 @@ def _run_suite(
         score = _social_score(success_rate, transfer_rate)
     elif suite.name in {"lifelong", "lifelong_diag"}:
         forgetting_vals: List[float] = []
+        forgetting_worst_vals: List[float] = []
         transfer_vals: List[float] = []
         expected_env_types: set[str] = set()
         ok_env_types: set[str] = set()
@@ -2706,10 +2718,14 @@ def _run_suite(
             fg = ll.get("lifelong_forgetting_R1_gap")
             if isinstance(fg, (int, float)) and math.isfinite(float(fg)):
                 forgetting_vals.append(float(fg))
+            strict_fg = _lifelong_forgetting_gap_from_eval(ll)
+            if strict_fg is not None:
+                forgetting_worst_vals.append(float(strict_fg))
             ft = _lifelong_forward_transfer_from_eval(ll)
             if ft is not None:
                 transfer_vals.append(float(ft))
         forgetting_gap = _safe_mean(forgetting_vals)
+        forgetting_worst_gap = _safe_mean(forgetting_worst_vals)
         forward_transfer = _safe_mean(transfer_vals)
         env_family_coverage = None
         if expected_env_types:
@@ -2717,13 +2733,17 @@ def _run_suite(
         metrics.update(
             {
                 "forgetting_gap": forgetting_gap,
+                "forgetting_worst_gap": forgetting_worst_gap,
                 "forward_transfer": forward_transfer,
                 "env_family_coverage": env_family_coverage,
                 "env_family_count_ok": float(len(ok_env_types)),
                 "env_family_count_expected": float(len(expected_env_types)),
             }
         )
-        score = _lifelong_score(forgetting_gap, forward_transfer)
+        score = _lifelong_score(
+            forgetting_worst_gap if forgetting_worst_gap is not None else forgetting_gap,
+            forward_transfer,
+        )
     elif suite.name in {"safety", "safety_ood"}:
         planner_ok = bool(safety_smoke_metrics.get("safety_planner_ok"))
         constraint_vals: List[float] = []

@@ -31,3 +31,23 @@ def test_lifelong_adaptation_delta_falls_back_without_common_scenarios():
         [1.0, 1.0, 10.0, 10.0],
         ["A", "A", "B", "B"],
     ) == pytest.approx(9.0)
+
+
+def test_lifelong_forgetting_summary_uses_ordered_primary_and_worst_gap():
+    summary = Trainer._lifelong_forgetting_summary(
+        {"R2": -0.1, "R1": 0.5, "R3": -2.0},
+        ["R1", "R2", "R3"],
+    )
+
+    assert summary["primary_regime"] == "R1"
+    assert summary["primary_gap"] == pytest.approx(0.5)
+    assert summary["worst_regime"] == "R3"
+    assert summary["worst_gap"] == pytest.approx(-2.0)
+    assert summary["mean_gap"] == pytest.approx((-0.1 + 0.5 - 2.0) / 3.0)
+
+
+def test_lifelong_forgetting_summary_is_deterministic_without_order():
+    summary = Trainer._lifelong_forgetting_summary({"b": 1.0, "a": 2.0})
+
+    assert summary["primary_regime"] == "a"
+    assert summary["primary_gap"] == pytest.approx(2.0)
