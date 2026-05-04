@@ -448,6 +448,9 @@ class Trainer:
         self.last_shadow_toolcall_steps = 0
         self.last_shadow_roundtrip_mismatch_count = 0
         self.last_shadow_error_count = 0
+        # CPU-side index validation is useful while debugging, but calling
+        # detach().cpu() in every rollout step serializes CUDA work.
+        self.validate_device_indices = False
         self._trait_safety_ctx: Dict[str, Dict[str, Any]] = {}
 
         descriptors = None
@@ -617,16 +620,17 @@ class Trainer:
     def _env_desc_from_ids(self, env_ids: torch.Tensor) -> Optional[torch.Tensor]:
         if self.env_descriptors is None:
             return None
-        # Explicitly validate indices on CPU to avoid CUDA device-side asserts.
-        max_id = int(self.env_descriptors.shape[0] - 1)
-        env_ids_cpu = env_ids.detach().cpu()
-        min_id = int(env_ids_cpu.min().item())
-        max_seen = int(env_ids_cpu.max().item())
-        if min_id < 0 or max_seen > max_id:
-            raise RuntimeError(
-                f"env_id out of range in _env_desc_from_ids: "
-                f"min={min_id}, max={max_seen}, n_envs={self.env_descriptors.shape[0]}"
-            )
+        if bool(getattr(self, "validate_device_indices", False)):
+            # Explicitly validate indices on CPU to avoid CUDA device-side asserts.
+            max_id = int(self.env_descriptors.shape[0] - 1)
+            env_ids_cpu = env_ids.detach().cpu()
+            min_id = int(env_ids_cpu.min().item())
+            max_seen = int(env_ids_cpu.max().item())
+            if min_id < 0 or max_seen > max_id:
+                raise RuntimeError(
+                    f"env_id out of range in _env_desc_from_ids: "
+                    f"min={min_id}, max={max_seen}, n_envs={self.env_descriptors.shape[0]}"
+                )
         return self.env_descriptors[env_ids]
 
     def _get_action_mask_tensor(self) -> Optional[torch.Tensor]:
@@ -1056,22 +1060,23 @@ class Trainer:
 
     def _env_max_steps_from_ids(self, env_ids: torch.Tensor) -> torch.Tensor:
         """
-        Map env_id tensor -> max_steps (float) with CPU-side bounds checking.
+        Map env_id tensor -> max_steps (float).
         """
         table = getattr(self, "env_max_steps_by_id", None)
         if table is None:
             ms = float(max(1, int(getattr(self.env, "max_steps", 1) or 1)))
             return torch.full_like(env_ids, ms, dtype=torch.float32, device=self.device)
 
-        max_id = int(table.shape[0] - 1)
-        env_ids_cpu = env_ids.detach().cpu()
-        min_id = int(env_ids_cpu.min().item())
-        max_seen = int(env_ids_cpu.max().item())
-        if min_id < 0 or max_seen > max_id:
-            raise RuntimeError(
-                f"env_id out of range in _env_max_steps_from_ids: "
-                f"min={min_id}, max={max_seen}, n_envs={table.shape[0]}"
-            )
+        if bool(getattr(self, "validate_device_indices", False)):
+            max_id = int(table.shape[0] - 1)
+            env_ids_cpu = env_ids.detach().cpu()
+            min_id = int(env_ids_cpu.min().item())
+            max_seen = int(env_ids_cpu.max().item())
+            if min_id < 0 or max_seen > max_id:
+                raise RuntimeError(
+                    f"env_id out of range in _env_max_steps_from_ids: "
+                    f"min={min_id}, max={max_seen}, n_envs={table.shape[0]}"
+                )
         return table[env_ids].to(self.device)
 
     def _scenario_text_for(self, env_obj: Any, scenario_id: int) -> str:
@@ -1163,25 +1168,26 @@ class Trainer:
         if table is None:
             return None
 
-        # Validate indices on CPU to avoid CUDA device-side asserts.
-        env_max = int(table.shape[0] - 1)
-        sc_max = int(table.shape[1] - 1)
-        env_cpu = env_ids.detach().cpu()
-        sc_cpu = scenario_ids.detach().cpu()
-        env_min_seen = int(env_cpu.min().item())
-        env_max_seen = int(env_cpu.max().item())
-        sc_min_seen = int(sc_cpu.min().item())
-        sc_max_seen = int(sc_cpu.max().item())
-        if env_min_seen < 0 or env_max_seen > env_max:
-            raise RuntimeError(
-                f"env_id out of range in _text_tokens_from_ids: "
-                f"min={env_min_seen}, max={env_max_seen}, n_envs={table.shape[0]}"
-            )
-        if sc_min_seen < 0 or sc_max_seen > sc_max:
-            raise RuntimeError(
-                f"scenario_id out of range in _text_tokens_from_ids: "
-                f"min={sc_min_seen}, max={sc_max_seen}, n_scenarios={table.shape[1]}"
-            )
+        if bool(getattr(self, "validate_device_indices", False)):
+            # Validate indices on CPU to avoid CUDA device-side asserts.
+            env_max = int(table.shape[0] - 1)
+            sc_max = int(table.shape[1] - 1)
+            env_cpu = env_ids.detach().cpu()
+            sc_cpu = scenario_ids.detach().cpu()
+            env_min_seen = int(env_cpu.min().item())
+            env_max_seen = int(env_cpu.max().item())
+            sc_min_seen = int(sc_cpu.min().item())
+            sc_max_seen = int(sc_cpu.max().item())
+            if env_min_seen < 0 or env_max_seen > env_max:
+                raise RuntimeError(
+                    f"env_id out of range in _text_tokens_from_ids: "
+                    f"min={env_min_seen}, max={env_max_seen}, n_envs={table.shape[0]}"
+                )
+            if sc_min_seen < 0 or sc_max_seen > sc_max:
+                raise RuntimeError(
+                    f"scenario_id out of range in _text_tokens_from_ids: "
+                    f"min={sc_min_seen}, max={sc_max_seen}, n_scenarios={table.shape[1]}"
+                )
 
         return table[env_ids, scenario_ids]
 
