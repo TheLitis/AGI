@@ -3,3 +3,4 @@ numpy>=1.24.0
 matplotlib>=3.7.0
 gymnasium
 minigrid
+arc-agi>=0.9.8
